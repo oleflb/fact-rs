@@ -53,7 +53,7 @@ impl OptParams for BaseOptParams {
 ///
 /// This trait is used to observe the optimization process. It is called at each
 /// step of the optimization process.
-pub trait OptObserver {
+pub trait OptObserver: Send {
     fn on_step(&self, values: &Values, time: i64);
 }
 

@@ -9,7 +9,7 @@ use faer::{
 use crate::dtype;
 
 /// Trait to solve sparse linear systems
-pub trait LinearSolver {
+pub trait LinearSolver: Send {
     /// Solve a symmetric linear system
     ///
     /// This will be used by Cholesky to solve A^T A and by Levenberg-Marquardt
