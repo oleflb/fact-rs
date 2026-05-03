@@ -286,6 +286,21 @@ pub struct FactorBuilderDyn {
 }
 
 impl FactorBuilderDyn {
+    pub fn new<R, K, I>(residual: R, keys: I) -> Self
+    where
+        R: Residual + 'static,
+        K: Symbol,
+        I: IntoIterator<Item = K>,
+    {
+        let keys = keys.into_iter().map(Into::into).collect();
+        Self {
+            keys,
+            residual: Box::new(residual),
+            noise: None,
+            robust: None,
+        }
+    }
+
     /// Add a noise model to the factor.
     pub fn noise<N>(mut self, noise: N) -> Self
     where
