@@ -18,6 +18,8 @@ type Alias<V, T> = <V as Variable>::Alias<T>;
 /// implement this.
 #[cfg_attr(feature = "serde", typetag::serde(tag = "tag"))]
 pub trait Residual: Debug + DynClone + Send {
+    fn num_keys(&self) -> usize;
+
     fn dim_in(&self) -> usize;
 
     fn dim_out(&self) -> usize;

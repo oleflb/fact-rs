@@ -20,6 +20,10 @@ pub struct GaussianNoise<const N: usize> {
 impl<const N: usize> NoiseModel for GaussianNoise<N> {
     type Dim = Const<N>;
 
+    fn dim(&self) -> usize {
+        N
+    }
+
     fn whiten_vec(&self, v: VectorX) -> VectorX {
         let mut out = VectorX::zeros(v.len());
         self.sqrt_inf.mul_to(&v, &mut out);

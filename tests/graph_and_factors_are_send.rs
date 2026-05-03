@@ -13,6 +13,6 @@ fn factor_is_send() {
 }
 
 #[test]
-fn factor_is_send() {
+fn optimizer_is_send() {
     assert_send::<GaussNewton>();
 }

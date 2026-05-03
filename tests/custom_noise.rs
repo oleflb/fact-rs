@@ -14,6 +14,10 @@ pub struct DoubleCovariance<const N: usize>;
 impl<const N: usize> NoiseModel for DoubleCovariance<N> {
     type Dim = Const<N>;
 
+    fn dim(&self) -> usize {
+        N
+    }
+
     fn whiten_vec(&self, v: VectorX) -> VectorX {
         2.0 * v
     }

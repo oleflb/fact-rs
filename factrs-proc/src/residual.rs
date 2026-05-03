@@ -62,6 +62,10 @@ pub fn mark(mut item: ItemImpl) -> TokenStream2 {
 
         #typetag
         impl #generics factrs::residuals::Residual for #self_ty #where_clause {
+            fn num_keys(&self) -> usize {
+                #num as usize
+            }
+
             fn dim_in(&self) -> usize {
                 <<Self as #residual_trait>::DimIn as factrs::linalg::DimName>::DIM
             }

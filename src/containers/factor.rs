@@ -3,11 +3,13 @@ use std::{
     marker::PhantomData,
 };
 
+use nalgebra::Dyn;
 use pad_adapter::PadAdapter;
 
 use super::{DefaultSymbolHandler, KeyFormatter, Symbol, TypedSymbol};
 use crate::{
     containers::{Key, Values},
+    core::UnitNoiseDyn,
     dtype,
     linalg::{Const, DiffResult, MatrixBlock},
     linear::LinearFactor,
@@ -262,6 +264,54 @@ impl<const DIM_OUT: usize> FactorBuilder<DIM_OUT> {
         UnitNoise<DIM_OUT>: NoiseModel,
     {
         let noise = self.noise.unwrap_or_else(|| Box::new(UnitNoise::<DIM_OUT>));
+        let robust = self.robust.unwrap_or_else(|| Box::new(L2));
+        Factor {
+            keys: self.keys.to_vec(),
+            residual: self.residual,
+            noise,
+            robust,
+        }
+    }
+}
+
+/// Builder for a factor with a dynamic number of residuals.
+///
+/// If the noise model or robust kernel aren't set, they default to [UnitNoise]
+/// and [L2] respectively.
+pub struct FactorBuilderDyn {
+    keys: Vec<Key>,
+    residual: Box<dyn Residual>,
+    noise: Option<Box<dyn NoiseModel>>,
+    robust: Option<Box<dyn RobustCost>>,
+}
+
+impl FactorBuilderDyn {
+    /// Add a noise model to the factor.
+    pub fn noise<N>(mut self, noise: N) -> Self
+    where
+        N: 'static + NoiseModel<Dim = Dyn> + NoiseModel,
+    {
+        self.noise = Some(Box::new(noise));
+        self
+    }
+
+    /// Add a robust kernel to the factor.
+    pub fn robust<C>(mut self, robust: C) -> Self
+    where
+        C: 'static + RobustCost,
+    {
+        self.robust = Some(Box::new(robust));
+        self
+    }
+
+    /// Build the factor.
+    pub fn build(self) -> Factor
+    where
+        UnitNoiseDyn: NoiseModel,
+    {
+        let noise = self
+            .noise
+            .unwrap_or_else(|| Box::new(UnitNoiseDyn::new(self.residual.dim_out())));
         let robust = self.robust.unwrap_or_else(|| Box::new(L2));
         Factor {
             keys: self.keys.to_vec(),

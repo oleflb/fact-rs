@@ -6,23 +6,19 @@
 use std::fmt::Debug;
 
 use dyn_clone::DynClone;
+use nalgebra::Dim;
 
-use crate::linalg::{DimName, MatrixX, VectorX};
+use crate::linalg::{MatrixX, VectorX};
 
 /// The trait for a noise model.
 #[cfg_attr(feature = "serde", typetag::serde(tag = "tag"))]
 pub trait NoiseModel: Debug + DynClone + Send {
     /// The dimension of the noise model
-    type Dim: DimName
+    type Dim: Dim
     where
         Self: Sized;
 
-    fn dim(&self) -> usize
-    where
-        Self: Sized,
-    {
-        Self::Dim::DIM
-    }
+    fn dim(&self) -> usize;
 
     /// Whiten a vector
     fn whiten_vec(&self, v: VectorX) -> VectorX;
@@ -40,4 +36,4 @@ mod gaussian;
 pub use gaussian::GaussianNoise;
 
 mod unit;
-pub use unit::UnitNoise;
+pub use unit::{UnitNoise, UnitNoiseDyn};

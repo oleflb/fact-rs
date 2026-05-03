@@ -218,7 +218,7 @@ pub mod core {
         containers::{Factor, Graph, Values},
         fac,
         linalg::{Vector1, Vector2, Vector3},
-        noise::{GaussianNoise, UnitNoise},
+        noise::{GaussianNoise, UnitNoise, UnitNoiseDyn},
         optimizers::{GaussNewton, LevenMarquardt},
         residuals::{BetweenResidual, PriorResidual},
         robust::{GemanMcClure, Huber, L2},
