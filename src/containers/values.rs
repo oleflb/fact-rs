@@ -178,6 +178,13 @@ impl Values {
             .filter_map(|(_, value)| value.downcast_ref::<T>())
     }
 
+    pub fn retain<F>(&mut self, f: F)
+    where
+        F: Fn(&Key) -> bool,
+    {
+        self.values.retain(|key, _| f(key));
+    }
+
     /// Update variables in place via the
     /// [oplus](crate::variables::Variable::oplus) operation.
     ///

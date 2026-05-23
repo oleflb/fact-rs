@@ -117,6 +117,15 @@ impl Graph {
     pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Factor> {
         self.factors.iter_mut()
     }
+
+    pub fn remove_factors<F>(&mut self, should_remove: F) -> Vec<Factor>
+    where
+        F: Fn(&Factor) -> bool,
+    {
+        self.factors
+            .extract_if(.., |factor| should_remove(factor))
+            .collect::<Vec<_>>()
+    }
 }
 
 impl Debug for Graph {
