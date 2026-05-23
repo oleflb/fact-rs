@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fmt::{Debug, Write},
     marker::PhantomData,
 };
@@ -10,7 +11,7 @@ use super::{DefaultSymbolHandler, Idx, KeyFormatter, Values, ValuesOrder};
 // Once "debug_closure_helpers" is stabilized, we won't need this anymore
 // Need custom debug to handle pretty key printing at the moment
 // Pad adapter helps with the pretty printing
-use crate::containers::factor::FactorFormatter;
+use crate::containers::{Key, factor::FactorFormatter};
 use crate::{containers::Factor, dtype, linear::LinearGraph};
 
 /// Structure to represent a nonlinear factor graph
@@ -116,6 +117,15 @@ impl Graph {
 
     pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Factor> {
         self.factors.iter_mut()
+    }
+
+    pub fn remove_factors<F>(&mut self, should_remove: F) -> Vec<Factor>
+    where
+        F: Fn(&Factor) -> bool,
+    {
+        self.factors
+            .extract_if(.., |factor| should_remove(factor))
+            .collect::<Vec<_>>()
     }
 }
 

@@ -214,7 +214,8 @@ impl<T: Numeric> MatrixLieGroup for SE23<T> {
     }
 
     fn hat_swap(xi: VectorView3<T>) -> Matrix3x9<T> {
-        // The velocity term does not affect the rigid body transformation of a 3D vector
+        // The velocity term does not affect the rigid body transformation of a 3D
+        // vector
         let mut mat = Matrix3x9::zeros();
         mat.fixed_view_mut::<3, 3>(0, 0)
             .copy_from(&SO3::hat_swap(xi.as_view()));
