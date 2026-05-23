@@ -75,7 +75,7 @@ impl Values {
         self.values.insert(symbol.into(), Box::new(value))
     }
 
-    pub(crate) fn get_raw<S>(&self, symbol: S) -> Option<&dyn VariableSafe>
+    pub fn get_raw<S>(&self, symbol: S) -> Option<&dyn VariableSafe>
     where
         S: Symbol,
     {
