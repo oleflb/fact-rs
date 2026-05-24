@@ -1,4 +1,7 @@
-use std::fmt::{Debug, Display};
+use std::{
+    any::type_name,
+    fmt::{Debug, Display},
+};
 
 use downcast_rs::{Downcast, impl_downcast};
 
@@ -183,6 +186,8 @@ pub trait VariableSafe: Debug + Display + Downcast + Send {
     fn dim(&self) -> usize;
 
     fn oplus_mut(&mut self, delta: VectorViewX);
+
+    fn ominus_safe(&self, other: &dyn VariableSafe) -> VectorX;
 }
 
 #[cfg_attr(feature = "serde", typetag::serde)]
@@ -197,6 +202,13 @@ impl<V: Variable<T = dtype> + 'static> VariableSafe for V {
 
     fn oplus_mut(&mut self, delta: VectorViewX) {
         *self = self.oplus(delta);
+    }
+
+    fn ominus_safe(&self, other: &dyn VariableSafe) -> VectorX {
+        let other = other
+            .downcast_ref::<Self>()
+            .unwrap_or_else(|| panic!("expected other to be of type {}", type_name::<Self>()));
+        self.ominus(other)
     }
 }
 
