@@ -1,6 +1,8 @@
 use std::fmt::{self, Debug};
 
 use super::{NoiseModel, UnitNoise};
+use nalgebra::Dyn;
+
 use crate::{
     dtype,
     linalg::{Const, Matrix, MatrixView, MatrixViewX, MatrixX, Vector, VectorView, VectorX},
@@ -131,6 +133,161 @@ impl<const N: usize> GaussianNoise<N> {
     }
 }
 
+/// Runtime-sized Gaussian noise model.
+#[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct GaussianNoiseDyn {
+    kind: GaussianNoiseDynKind,
+}
+
+#[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+enum GaussianNoiseDynKind {
+    Matrix(MatrixX),
+    Scalar(dtype),
+    Split(dtype, dtype),
+}
+
+#[factrs::mark]
+impl NoiseModel for GaussianNoiseDyn {
+    type Dim = Dyn;
+
+    fn dim(&self) -> usize {
+        match &self.kind {
+            GaussianNoiseDynKind::Matrix(sqrt_inf) => sqrt_inf.nrows(),
+            GaussianNoiseDynKind::Scalar(_) | GaussianNoiseDynKind::Split(_, _) => 0,
+        }
+    }
+
+    fn whiten_vec(&self, v: VectorX) -> VectorX {
+        match &self.kind {
+            GaussianNoiseDynKind::Matrix(sqrt_inf) => {
+                assert_eq!(
+                    sqrt_inf.nrows(),
+                    v.len(),
+                    "GaussianNoiseDyn vector dimension mismatch"
+                );
+                sqrt_inf * v
+            }
+            GaussianNoiseDynKind::Scalar(sqrt_inf) => v * *sqrt_inf,
+            GaussianNoiseDynKind::Split(sqrt_inf1, sqrt_inf2) => {
+                let split = v.len() / 2;
+                v.map_with_location(|row, _, value| {
+                    if row < split {
+                        value * *sqrt_inf1
+                    } else {
+                        value * *sqrt_inf2
+                    }
+                })
+            }
+        }
+    }
+
+    fn whiten_mat(&self, m: MatrixX) -> MatrixX {
+        match &self.kind {
+            GaussianNoiseDynKind::Matrix(sqrt_inf) => {
+                assert_eq!(
+                    sqrt_inf.nrows(),
+                    m.nrows(),
+                    "GaussianNoiseDyn matrix dimension mismatch"
+                );
+                sqrt_inf * m
+            }
+            GaussianNoiseDynKind::Scalar(sqrt_inf) => m * *sqrt_inf,
+            GaussianNoiseDynKind::Split(sqrt_inf1, sqrt_inf2) => {
+                let split = m.nrows() / 2;
+                m.map_with_location(|row, _, value| {
+                    if row < split {
+                        value * *sqrt_inf1
+                    } else {
+                        value * *sqrt_inf2
+                    }
+                })
+            }
+        }
+    }
+}
+
+impl GaussianNoiseDyn {
+    pub fn from_scalar_sigma(sigma: dtype) -> Self {
+        Self {
+            kind: GaussianNoiseDynKind::Scalar(1.0 / sigma),
+        }
+    }
+
+    pub fn from_scalar_cov(cov: dtype) -> Self {
+        Self {
+            kind: GaussianNoiseDynKind::Scalar(1.0 / cov.sqrt()),
+        }
+    }
+
+    pub fn from_split_sigma(sigma1: dtype, sigma2: dtype) -> Self {
+        Self {
+            kind: GaussianNoiseDynKind::Split(1.0 / sigma1, 1.0 / sigma2),
+        }
+    }
+
+    pub fn from_split_cov(cov1: dtype, cov2: dtype) -> Self {
+        Self {
+            kind: GaussianNoiseDynKind::Split(1.0 / cov1.sqrt(), 1.0 / cov2.sqrt()),
+        }
+    }
+
+    pub fn from_matrix_cov(cov: MatrixViewX<'_>) -> Option<Self> {
+        if cov.nrows() != cov.ncols() {
+            return None;
+        }
+        let sqrt_inf = cov.into_owned().try_inverse()?.cholesky()?.l().transpose();
+        Some(Self {
+            kind: GaussianNoiseDynKind::Matrix(sqrt_inf),
+        })
+    }
+
+    pub fn from_matrix_inf(inf: MatrixViewX<'_>) -> Option<Self> {
+        if inf.nrows() != inf.ncols() {
+            return None;
+        }
+        let sqrt_inf = inf.into_owned().cholesky()?.l().transpose();
+        Some(Self {
+            kind: GaussianNoiseDynKind::Matrix(sqrt_inf),
+        })
+    }
+
+    pub fn from_matrix_sqrt_inf(sqrt_inf: MatrixX) -> Option<Self> {
+        if sqrt_inf.nrows() != sqrt_inf.ncols() {
+            return None;
+        }
+        Some(Self {
+            kind: GaussianNoiseDynKind::Matrix(sqrt_inf),
+        })
+    }
+}
+
+impl Debug for GaussianNoiseDyn {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "GaussianNoiseDyn{}", self.dim())
+    }
+}
+
+impl fmt::Display for GaussianNoiseDyn {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self.kind {
+            GaussianNoiseDynKind::Matrix(sqrt_inf) => {
+                write!(f, "GaussianNoiseDyn{}: {sqrt_inf}", self.dim())
+            }
+            GaussianNoiseDynKind::Scalar(sqrt_inf) => {
+                write!(f, "GaussianNoiseDyn(std: {})", 1.0 / sqrt_inf)
+            }
+            GaussianNoiseDynKind::Split(sqrt_inf1, sqrt_inf2) => write!(
+                f,
+                "GaussianNoiseDyn(std: [{}, {}])",
+                1.0 / sqrt_inf1,
+                1.0 / sqrt_inf2
+            ),
+        }
+    }
+}
+
 fn is_diagonal(n: usize, m: MatrixViewX) -> bool {
     for i in 0..n {
         for j in 0..n {
@@ -241,5 +398,42 @@ make_gaussian_vector! {
 impl<const N: usize> fmt::Display for GaussianNoise<N> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "GaussianNoise{}: {:}", self.dim(), self.sqrt_inf)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::linalg::vectorx;
+
+    #[test]
+    fn gaussian_noise_dyn_from_cov_whitens_vector() {
+        let cov = MatrixX::from_row_slice(2, 2, &[4.0, 0.0, 0.0, 9.0]);
+        let noise = GaussianNoiseDyn::from_matrix_cov(cov.as_view())
+            .expect("positive definite covariance");
+        let got = noise.whiten_vec(vectorx![2.0, 3.0]);
+        assert_eq!(got, vectorx![1.0, 1.0]);
+    }
+
+    #[test]
+    fn gaussian_noise_dyn_rejects_non_square_matrix() {
+        let cov = MatrixX::zeros(2, 3);
+        assert!(GaussianNoiseDyn::from_matrix_cov(cov.as_view()).is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "GaussianNoiseDyn vector dimension mismatch")]
+    fn gaussian_noise_dyn_rejects_dimension_mismatch() {
+        let cov = MatrixX::identity(2, 2);
+        let noise = GaussianNoiseDyn::from_matrix_cov(cov.as_view())
+            .expect("positive definite covariance");
+        let _ = noise.whiten_vec(vectorx![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn gaussian_noise_dyn_scalar_accepts_runtime_length() {
+        let noise = GaussianNoiseDyn::from_scalar_sigma(2.0);
+        let got = noise.whiten_vec(vectorx![2.0, 4.0, 6.0]);
+        assert_eq!(got, vectorx![1.0, 2.0, 3.0]);
     }
 }

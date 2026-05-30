@@ -1,114 +1,161 @@
-use std::fmt::Debug;
-
-use dyn_clone::DynClone;
+use std::{any::type_name, fmt::Debug};
 
 use crate::{
     containers::{Key, Values},
-    linalg::{Diff, DiffResult, DimName, MatrixX, Numeric, VectorX},
-    variables::{Variable, VariableDtype},
+    dtype,
+    linalg::{Diff, DiffResult, MatrixX, Numeric, VectorX},
+    residuals::{DynVarPack, ResidualError, VarPack},
+    variables::VariableDtype,
 };
+use dyn_clone::DynClone;
 
-type Alias<V, T> = <V as Variable>::Alias<T>;
+/// Typed residual authoring trait.
+pub trait Residual: Debug + Clone + Send + 'static {
+    type Input: VarPack;
+    type Differ: DiffPack<Self::Input>;
 
-// ------------------ Base Residual Trait & Helpers ------------------ //
-/// Base trait for residuals
-///
-/// This trait is used to implement custom residuals. It is recommended to use
-/// implement one of the `ResidualN` traits, and then [mark](factrs::mark) it to
-/// implement this.
-#[cfg_attr(feature = "serde", typetag::serde(tag = "tag"))]
-pub trait Residual: Debug + DynClone + Send {
-    fn num_keys(&self) -> usize;
-
-    fn dim_in(&self) -> usize;
-
-    fn dim_out(&self) -> usize;
-
-    fn residual(&self, values: &Values, keys: &[Key]) -> VectorX;
-
-    fn residual_jacobian(&self, values: &Values, keys: &[Key]) -> DiffResult<VectorX, MatrixX>;
+    fn residual<T: Numeric>(&self, input: <Self::Input as VarPack>::Packed<T>) -> VectorX<T>;
 }
 
-dyn_clone::clone_trait_object!(Residual);
+/// Optional marker for residuals with a compile-time output dimension.
+pub trait FixedOutputDim {
+    type DimOut: crate::linalg::DimName;
+}
 
-// -------------- Use Macro to create residuals with set sizes -------------- //
-use paste::paste;
+/// Object-safe residual trait stored by factors.
+#[cfg_attr(feature = "serde", typetag::serde(tag = "tag"))]
+pub trait ErasedResidual: Debug + DynClone + Send {
+    fn dim_in(&self, values: &Values, keys: &[Key]) -> Result<usize, ResidualError>;
+
+    fn dim_out(&self, values: &Values, keys: &[Key]) -> Result<usize, ResidualError>;
+
+    fn residual(&self, values: &Values, keys: &[Key]) -> Result<VectorX, ResidualError>;
+
+    fn residual_jacobian(
+        &self,
+        values: &Values,
+        keys: &[Key],
+    ) -> Result<DiffResult<VectorX, MatrixX>, ResidualError>;
+}
+
+dyn_clone::clone_trait_object!(ErasedResidual);
+
 #[cfg(feature = "serde")]
-pub use register_residual as tag_residual;
-macro_rules! residual_maker {
-    ($num:expr, $( ($idx:expr, $name:ident, $var:ident) ),*) => {
-        paste! {
-            #[doc=concat!("Residual trait for ", $num, " variables")]
-            pub trait [<Residual $num>]: Residual
+pub use register_erasedresidual as tag_residual;
+
+/// Dynamic residuals receive values plus a runtime key pack.
+pub trait DynResidual: Debug + Clone + Send + 'static {
+    fn residual(&self, values: &Values, input: &DynVarPack) -> VectorX;
+
+    fn residual_jacobian(
+        &self,
+        values: &Values,
+        input: &DynVarPack,
+    ) -> DiffResult<VectorX, MatrixX> {
+        numerical_jacobian_dyn(self, values, input)
+    }
+}
+
+/// Differentiates a typed residual over a variable pack.
+pub trait DiffPack<P: VarPack>: Diff {
+    fn jacobian<R>(
+        residual: &R,
+        values: &Values,
+        keys: &[Key],
+    ) -> Result<DiffResult<VectorX, MatrixX>, ResidualError>
+    where
+        R: Residual<Input = P>;
+}
+
+fn check_key_count(keys: &[Key], expected: usize) -> Result<(), ResidualError> {
+    if keys.len() == expected {
+        Ok(())
+    } else {
+        Err(ResidualError::WrongKeyCount {
+            expected,
+            actual: keys.len(),
+        })
+    }
+}
+
+fn get_var<V: VariableDtype + 'static>(values: &Values, key: Key) -> Result<&V, ResidualError> {
+    values
+        .get_unchecked(key)
+        .ok_or(ResidualError::WrongVariableType {
+            key,
+            expected: type_name::<V>(),
+        })
+}
+
+impl<D, V> DiffPack<V> for D
+where
+    D: Diff,
+    V: VariableDtype + 'static,
+{
+    fn jacobian<R>(
+        residual: &R,
+        values: &Values,
+        keys: &[Key],
+    ) -> Result<DiffResult<VectorX, MatrixX>, ResidualError>
+    where
+        R: Residual<Input = V>,
+    {
+        check_key_count(keys, 1)?;
+        let v1 = get_var::<V>(values, keys[0])?;
+        Ok(D::jacobian_1(|v1| residual.residual(v1), v1))
+    }
+}
+
+macro_rules! impl_tuple_diff_pack {
+    ($count:expr, $method:ident, $(($idx:tt, $name:ident, $var:ident)),+ $(,)?) => {
+        impl<D, $($var),+> DiffPack<($($var,)+)> for D
+        where
+            D: Diff,
+            $($var: VariableDtype + 'static,)+
+        {
+            fn jacobian<R>(
+                residual: &R,
+                values: &Values,
+                keys: &[Key],
+            ) -> Result<DiffResult<VectorX, MatrixX>, ResidualError>
+            where
+                R: Residual<Input = ($($var,)+)>,
             {
+                check_key_count(keys, $count)?;
                 $(
-                    #[doc=concat!("Type of variable ", $idx)]
-                    type $var: VariableDtype;
-                )*
-                /// The total input dimension
-                type DimIn: DimName;
-                /// The output dimension of the residual
-                type DimOut: DimName;
-                /// Differentiator type (see [Diff](crate::linalg::Diff))
-                type Differ: Diff;
-
-                /// Main residual computation
-                ///
-                /// If implementing your own residual, this is the only method you need to implement.
-                /// It is generic over the dtype to allow for differentiable types.
-                fn [<residual $num>]<T: Numeric>(&self, $($name: Alias<Self::$var, T>,)*) -> VectorX<T>;
-
-                #[doc="Wrapper that unpacks and calls [" [<residual $num>] "](Self::" [<residual $num>] ")."]
-                fn [<residual $num _values>](&self, values: &Values, keys: &[Key]) -> VectorX
-                where
-                    $(
-                        Self::$var: 'static,
-                    )*
-                 {
-                    // Unwrap everything
-                    $(
-                        let $name: &Self::$var = values.get_unchecked(keys[$idx]).unwrap_or_else(|| {
-                            panic!("Key not found in values: {:?} with type {}", keys[$idx], std::any::type_name::<Self::$var>())
-                        });
-                    )*
-                    self.[<residual $num>]($($name.clone(),)*)
-                }
-
-
-                #[doc="Wrapper that unpacks variables and computes jacobians using [" [<residual $num>] "](Self::" [<residual $num>] ")."]
-                fn [<residual $num _jacobian>](&self, values: &Values, keys: &[Key]) -> DiffResult<VectorX, MatrixX>
-                where
-                    $(
-                        Self::$var: 'static,
-                    )*
-                {
-                    // Unwrap everything
-                    $(
-                        let $name: &Self::$var = values.get_unchecked(keys[$idx]).unwrap_or_else(|| {
-                            panic!("Key not found in values: {:?} with type {}", keys[$idx], std::any::type_name::<Self::$var>())
-                        });
-                    )*
-                    Self::Differ::[<jacobian_ $num>](|$($name,)*| self.[<residual $num>]($($name,)*), $($name,)*)
-                }
+                    let $name = get_var::<$var>(values, keys[$idx])?;
+                )+
+                Ok(D::$method(
+                    |$($name),+| residual.residual(($($name,)+)),
+                    $($name,)+
+                ))
             }
         }
     };
 }
 
-residual_maker!(1, (0, v1, V1));
-residual_maker!(2, (0, v1, V1), (1, v2, V2));
-residual_maker!(3, (0, v1, V1), (1, v2, V2), (2, v3, V3));
-residual_maker!(4, (0, v1, V1), (1, v2, V2), (2, v3, V3), (3, v4, V4));
-residual_maker!(
+impl_tuple_diff_pack!(2, jacobian_2, (0, v1, V1), (1, v2, V2));
+impl_tuple_diff_pack!(3, jacobian_3, (0, v1, V1), (1, v2, V2), (2, v3, V3));
+impl_tuple_diff_pack!(
+    4,
+    jacobian_4,
+    (0, v1, V1),
+    (1, v2, V2),
+    (2, v3, V3),
+    (3, v4, V4)
+);
+impl_tuple_diff_pack!(
     5,
+    jacobian_5,
     (0, v1, V1),
     (1, v2, V2),
     (2, v3, V3),
     (3, v4, V4),
     (4, v5, V5)
 );
-residual_maker!(
+impl_tuple_diff_pack!(
     6,
+    jacobian_6,
     (0, v1, V1),
     (1, v2, V2),
     (2, v3, V3),
@@ -116,3 +163,114 @@ residual_maker!(
     (4, v5, V5),
     (5, v6, V6)
 );
+
+fn numerical_jacobian_dyn<R: DynResidual>(
+    residual: &R,
+    values: &Values,
+    input: &DynVarPack,
+) -> DiffResult<VectorX, MatrixX> {
+    let eps = dtype::powi(10.0, -6);
+    let keys = input.keys();
+    let dims = keys
+        .iter()
+        .map(|key| {
+            values
+                .get_raw(*key)
+                .unwrap_or_else(|| panic!("missing key in dynamic residual: {key:?}"))
+                .dim()
+        })
+        .collect::<Vec<_>>();
+    let dim_total = dims.iter().sum();
+    let value = residual.residual(values, input);
+    let mut jac = MatrixX::zeros(value.len(), dim_total);
+
+    let mut col = 0;
+    for (key, dim) in keys.iter().zip(dims) {
+        for j in 0..dim {
+            let mut delta = VectorX::zeros(dim);
+            delta[j] = eps;
+
+            let mut plus_values = values.clone();
+            plus_values
+                .get_raw_mut(*key)
+                .unwrap_or_else(|| panic!("missing key in dynamic residual: {key:?}"))
+                .oplus_mut(delta.as_view());
+            let plus = residual.residual(&plus_values, input);
+
+            delta[j] = -eps;
+            let mut minus_values = values.clone();
+            minus_values
+                .get_raw_mut(*key)
+                .unwrap_or_else(|| panic!("missing key in dynamic residual: {key:?}"))
+                .oplus_mut(delta.as_view());
+            let minus = residual.residual(&minus_values, input);
+
+            let deriv = (plus - minus) / (2.0 * eps);
+            jac.column_mut(col).copy_from(&deriv);
+            col += 1;
+        }
+    }
+
+    DiffResult { value, diff: jac }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        assign_symbols,
+        containers::{FactorBuilder, Values},
+        linalg::VectorX,
+        variables::{Variable, VectorVar2, VectorVar3},
+    };
+
+    assign_symbols!(X: VectorVar2; Y: VectorVar3);
+
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    struct DimResidual;
+
+    #[factrs::mark]
+    impl DynResidual for DimResidual {
+        fn residual(&self, values: &Values, input: &DynVarPack) -> VectorX {
+            VectorX::from_iterator(
+                input.keys().len(),
+                input
+                    .keys()
+                    .iter()
+                    .map(|key| {
+                        values
+                            .get_raw(*key)
+                            .expect("dynamic residual key must exist")
+                            .dim() as dtype
+                    }),
+            )
+        }
+    }
+
+    #[test]
+    fn dyn_residual_receives_values_and_key_pack() {
+        let keys: Vec<Key> = vec![X(0).into(), Y(0).into()];
+        let input = DynVarPack::new(keys).expect("valid dynamic variable pack");
+        let mut values = Values::new();
+        values.insert(X(0), VectorVar2::identity());
+        values.insert(Y(0), VectorVar3::identity());
+
+        let residual = DynResidual::residual(&DimResidual, &values, &input);
+        assert_eq!(residual.as_slice(), &[2.0, 3.0]);
+    }
+
+    #[test]
+    fn dyn_residual_default_numerical_jacobian_has_expected_shape() {
+        let keys: Vec<Key> = vec![X(0).into(), Y(0).into()];
+        let input = DynVarPack::new(keys).expect("valid dynamic variable pack");
+        let factor = FactorBuilder::new_dyn(DimResidual, input).build();
+        let mut values = Values::new();
+        values.insert(X(0), VectorVar2::identity());
+        values.insert(Y(0), VectorVar3::identity());
+
+        let linear = factor.linearize(&values);
+        assert_eq!(linear.b.len(), 2);
+        assert_eq!(linear.a.mat().shape(), (2, 5));
+    }
+}

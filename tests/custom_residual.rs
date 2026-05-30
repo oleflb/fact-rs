@@ -3,11 +3,10 @@ use core::fmt;
 use factrs::{
     dtype,
     linalg::{ForwardProp, Numeric, VectorX, vectorx},
-    residuals::Residual1,
+    residuals::Residual,
     traits::Variable,
     variables::SE2,
 };
-use nalgebra::Const;
 
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -22,13 +21,11 @@ impl XPrior {
 }
 
 #[factrs::mark]
-impl Residual1 for XPrior {
-    type Differ = ForwardProp<<Self as Residual1>::DimIn>;
-    type V1 = SE2;
-    type DimIn = <SE2 as Variable>::Dim;
-    type DimOut = Const<1>;
+impl Residual for XPrior {
+    type Differ = ForwardProp<<SE2 as Variable>::Dim>;
+    type Input = SE2;
 
-    fn residual1<T: Numeric>(&self, v: SE2<T>) -> VectorX<T> {
+    fn residual<T: Numeric>(&self, v: SE2<T>) -> VectorX<T> {
         let z_meas = T::from(self.x);
         vectorx![z_meas - v.xy().x]
     }
@@ -44,14 +41,14 @@ impl fmt::Display for XPrior {
 
 #[cfg(feature = "serde")]
 mod ser_de {
-    use factrs::{containers::Values, symbols::X, traits::Residual};
+    use factrs::{containers::Values, symbols::X, traits::ErasedResidual};
 
     use super::*;
 
     // Make sure it serializes properly
     #[test]
     fn test_json_serialize() {
-        let trait_object = &XPrior::new(1.2) as &dyn Residual;
+        let trait_object = &XPrior::new(1.2) as &dyn ErasedResidual;
         let json = serde_json::to_string(trait_object).unwrap();
         let expected = r#"{"tag":"XPrior","x":1.2}"#;
         println!("json: {json}");
@@ -61,14 +58,15 @@ mod ser_de {
     #[test]
     fn test_json_deserialize() {
         let json = r#"{"tag":"XPrior","x":1.2}"#;
-        let trait_object: Box<dyn Residual> = serde_json::from_str(json).unwrap();
+        let trait_object: Box<dyn ErasedResidual> = serde_json::from_str(json).unwrap();
 
         let mut values = Values::new();
         values.insert_unchecked(X(0), SE2::new(0.0, 1.2, 0.0));
-        let error = trait_object.residual(&values, &[X(0).into()])[0];
+        let keys = [X(0).into()];
+        let error = trait_object.residual(&values, &keys).unwrap()[0];
 
-        assert_eq!(trait_object.dim_in(), 3);
-        assert_eq!(trait_object.dim_out(), 1);
+        assert_eq!(trait_object.dim_in(&values, &keys).unwrap(), 3);
+        assert_eq!(trait_object.dim_out(&values, &keys).unwrap(), 1);
         assert_eq!(error, 0.0);
     }
 }

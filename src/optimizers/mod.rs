@@ -86,7 +86,7 @@ pub mod test {
 
         let mut graph = Graph::new();
         let res = PriorResidual::new(p.clone());
-        let factor = FactorBuilder::new1_unchecked(res, X(0)).build();
+        let factor = FactorBuilder::new_unchecked(res, X(0)).build();
         graph.add_factor(factor);
 
         let mut opt = new(graph);
@@ -131,12 +131,12 @@ pub mod test {
 
         let mut graph = Graph::new();
         let res = PriorResidual::new(p1.clone());
-        let factor = FactorBuilder::new1_unchecked(res, X(0)).build();
+        let factor = FactorBuilder::new_unchecked(res, X(0)).build();
         graph.add_factor(factor);
 
         let diff = p2.minus(&p1);
         let res = BetweenResidual::new(diff);
-        let factor = FactorBuilder::new2_unchecked(res, X(0), X(1)).build();
+        let factor = FactorBuilder::new_unchecked(res, (X(0), X(1))).build();
         graph.add_factor(factor);
 
         let mut opt = new(graph);

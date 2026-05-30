@@ -5,9 +5,9 @@
 //!
 //! # Examples
 //! Here we make a custom residual for a z-position measurement.
-//! The `DimIn` and `DimOut` are the dimensions in and out, respectively,
-//! while `V1` represents the type of the variable used (and more higher
-//! numbered residuals have `V2`, `V3`, etc).
+//! Residuals define one associated input pack implementing [`VarPack`]. For a
+//! unary residual this can be a single variable type, and for multi-variable
+//! residuals this can be a tuple of variable types.
 //!
 //! `Differ` is the object that computes our auto-differentation. Out of the box
 //! factrs comes with [ForwardProp](factrs::linalg::ForwardProp) and
@@ -35,21 +35,21 @@
 //! }
 //!
 //! #[factrs::mark]
-//! impl residuals::Residual1 for ZResidual {
-//!     type DimIn = Const<6>;
-//!     type DimOut = Const<1>;
-//!     type V1 = SE3;
+//! impl residuals::Residual for ZResidual {
+//!     type Input = SE3;
 //!     type Differ = ForwardProp<Const<6>>;
 //!
-//!     fn residual1<T: Numeric>(&self, x1: SE3<T>) -> VectorX<T> {
+//!     fn residual<T: Numeric>(&self, x1: SE3<T>) -> VectorX<T> {
 //!         VectorX::from_element(1, T::from(self.value) - x1.xyz().z)
 //!     }
 //! }
 //! ```
 mod traits;
+mod var_pack;
 #[cfg(feature = "serde")]
 pub use traits::tag_residual;
-pub use traits::{Residual, Residual1, Residual2, Residual3, Residual4, Residual5, Residual6};
+pub use traits::{DiffPack, DynResidual, ErasedResidual, FixedOutputDim, Residual};
+pub use var_pack::{DynVarPack, FactorInput, KeyPack, ResidualError, VarPack};
 
 mod prior;
 pub use prior::PriorResidual;

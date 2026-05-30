@@ -17,7 +17,6 @@ use factrs::{
     core::{BetweenResidual, GaussNewton, Graph, Values},
     dtype, fac,
     linalg::{Const, ForwardProp, Numeric, NumericalDiff, VectorX},
-    residuals::Residual1,
     traits::*,
     variables::{SE2, VectorVar2},
 };
@@ -39,21 +38,19 @@ impl GpsResidual {
 
 // The `mark` macro handles serialization stuff and some custom impl as well
 #[factrs::mark]
-impl Residual1 for GpsResidual {
+impl Residual for GpsResidual {
     // Use forward propagation for differentiation
-    type Differ = ForwardProp<<Self as Residual1>::DimIn>;
+    type Differ = ForwardProp<Const<3>>;
     // Alternatively, could use numerical differentiation (6 => 10^-6 as
     // denominator)
     // type Differ = NumericalDiff<6>;
 
     // The input variable type, input dimension of variable(s), and output dimension
     // of residual
-    type V1 = SE2;
-    type DimIn = Const<3>;
-    type DimOut = Const<2>;
+    type Input = SE2;
 
     // D is a custom numeric type that can be leveraged for autodiff
-    fn residual1<T: Numeric>(&self, v: SE2<T>) -> VectorX<T> {
+    fn residual<T: Numeric>(&self, v: SE2<T>) -> VectorX<T> {
         // Convert measurement from dtype to T
         let p_meas = self.meas.cast();
         // Convert p to VectorVar2 as well

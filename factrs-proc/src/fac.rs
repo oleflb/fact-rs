@@ -1,4 +1,4 @@
-use proc_macro2::{Span, TokenStream as TokenStream2};
+use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote, ToTokens};
 use syn::{
     parse::Parse, parse_quote, punctuated::Punctuated, spanned::Spanned, Expr, ExprCast, Ident,
@@ -7,7 +7,7 @@ use syn::{
 
 pub struct Factor {
     residual: Expr,
-    keys: Punctuated<Expr, Token![,]>,
+    keys: Expr,
     noise: Option<Expr>,
     robust: Option<Expr>,
 }
@@ -28,10 +28,9 @@ impl Factor {
     }
 
     fn new_call(&self) -> TokenStream2 {
-        let func = Ident::new(&format!("new{}", self.keys.len()), Span::call_site());
         let res = &self.residual;
         let keys = &self.keys;
-        quote! { #func(#res, #keys) }
+        quote! { new(#res, #keys) }
     }
 }
 
@@ -55,25 +54,8 @@ impl Parse for Factor {
         // Residual is first
         let residual = input[0].clone();
 
-        // Then the keys
-        let keys = match &input[1] {
-            // in brackets
-            Expr::Array(a) => a.elems.clone(),
-            // in parentheses
-            Expr::Tuple(t) => t.elems.clone(),
-            // a single key for unary factors
-            Expr::Path(_) | Expr::Call(_) => {
-                let mut p = Punctuated::<Expr, Token![,]>::new();
-                p.push(input[1].clone());
-                p
-            }
-            _ => {
-                return Err(syn::Error::new_spanned(
-                    &input[1],
-                    "Expected keys in brackets or parentheses",
-                ));
-            }
-        };
+        // Then the keys / input pack
+        let keys = input[1].clone();
 
         // Then the noise
         let noise = if input.len() >= 3 {
@@ -98,15 +80,15 @@ impl Parse for Factor {
                             }
                             let (a, b) = (&t.elems[0], &t.elems[1]);
                             let func = format_ident!("from_split_{}", ty);
-                            Some(parse_quote!(#m::GaussianNoise::#func(#a, #b)))
+                            Some(parse_quote!(#m::GaussianNoiseDyn::#func(#a, #b)))
                         }
                         _ => {
                             let func = format_ident!("from_scalar_{}", ty);
-                            Some(parse_quote!(#m::GaussianNoise::#func(#expr)))
+                            Some(parse_quote!(#m::GaussianNoiseDyn::#func(#expr)))
                         }
                     }
                 }
-                Expr::Infer(_) => Some(parse_quote!(#m::UnitNoise)),
+                Expr::Infer(_) => Some(parse_quote!(#m::UnitNoiseDyn::default())),
                 _ => Some(input[2].clone()),
             }
         } else {
@@ -131,8 +113,8 @@ impl Parse for Factor {
 
 pub fn fac(factor: Factor) -> TokenStream2 {
     let call = factor.new_call();
-    let noise = factor.robust_call();
-    let robust = factor.noise_call();
+    let noise = factor.noise_call();
+    let robust = factor.robust_call();
 
     let out = quote! {
         factrs::containers::FactorBuilder:: #call #noise #robust.build()

@@ -82,6 +82,13 @@ impl Values {
         self.values.get(&symbol.into()).map(|f| f.as_ref())
     }
 
+    pub fn get_raw_mut<S>(&mut self, symbol: S) -> Option<&mut dyn VariableSafe>
+    where
+        S: Symbol,
+    {
+        self.values.get_mut(&symbol.into()).map(|f| f.as_mut())
+    }
+
     /// Returns the underlying variable.
     ///
     /// This will return the value if variable is in the graph. Requires a typed

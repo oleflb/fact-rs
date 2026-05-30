@@ -3,18 +3,18 @@ use std::{
     marker::PhantomData,
 };
 
-use nalgebra::Dyn;
 use pad_adapter::PadAdapter;
 
-use super::{DefaultSymbolHandler, KeyFormatter, Symbol, TypedSymbol};
+use super::{DefaultSymbolHandler, KeyFormatter};
 use crate::{
     containers::{Key, Values},
-    core::UnitNoiseDyn,
     dtype,
-    linalg::{Const, DiffResult, MatrixBlock},
+    linalg::{DiffResult, MatrixBlock},
     linear::LinearFactor,
-    noise::{NoiseModel, UnitNoise},
-    residuals::Residual,
+    noise::{NoiseModel, UnitNoiseDyn},
+    residuals::{
+        DynResidual, DynVarPack, ErasedResidual, FactorInput, KeyPack, Residual, ResidualError,
+    },
     robust::{L2, RobustCost},
 };
 
@@ -55,14 +55,13 @@ use crate::{
 /// let residual = PriorResidual::new(prior);
 /// let noise = GaussianNoise::<3>::from_diag_sigmas(1e-1, 2e-1, 3e-1);
 /// let robust = GemanMcClure::default();
-/// let factor = FactorBuilder::new1(residual,
-///     X(0)).noise(noise).robust(robust).build();
+/// let factor = FactorBuilder::new(residual, X(0)).noise(noise).robust(robust).build();
 /// ```
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Factor {
     pub(crate) keys: Vec<Key>,
-    pub(crate) residual: Box<dyn Residual>,
+    pub(crate) residual: Box<dyn ErasedResidual>,
     pub(crate) noise: Box<dyn NoiseModel>,
     pub(crate) robust: Box<dyn RobustCost>,
 }
@@ -70,21 +69,39 @@ pub struct Factor {
 impl Factor {
     /// Compute the error of the factor given a set of values.
     pub fn error(&self, values: &Values) -> dtype {
-        let r = self.residual.residual(values, &self.keys);
+        self.try_error(values)
+            .expect("failed to evaluate factor error")
+    }
+
+    pub fn try_error(&self, values: &Values) -> Result<dtype, ResidualError> {
+        let r = self.residual.residual(values, &self.keys)?;
+        self.validate_noise_dim(r.len())?;
         let r = self.noise.whiten_vec(r);
         let norm2 = r.norm_squared();
-        self.robust.loss(norm2)
+        Ok(self.robust.loss(norm2))
     }
 
     /// Compute the dimension of the output of the factor.
-    pub fn dim_out(&self) -> usize {
-        self.residual.dim_out()
+    pub fn dim_out(&self, values: &Values) -> usize {
+        self.try_dim_out(values)
+            .expect("failed to evaluate factor output dimension")
+    }
+
+    pub fn try_dim_out(&self, values: &Values) -> Result<usize, ResidualError> {
+        self.residual.dim_out(values, &self.keys)
     }
 
     /// Linearize the factor given a set of values into a [LinearFactor].
     pub fn linearize(&self, values: &Values) -> LinearFactor {
+        self.try_linearize(values)
+            .expect("failed to linearize factor")
+    }
+
+    pub fn try_linearize(&self, values: &Values) -> Result<LinearFactor, ResidualError> {
         // Compute residual and jacobian
-        let DiffResult { value: r, diff: a } = self.residual.residual_jacobian(values, &self.keys);
+        let DiffResult { value: r, diff: a } =
+            self.residual.residual_jacobian(values, &self.keys)?;
+        self.validate_linearization(values, r.len(), a.nrows(), a.ncols())?;
 
         // Whiten residual and jacobian
         let r = self.noise.whiten_vec(r);
@@ -108,12 +125,50 @@ impl Factor {
             .collect::<Vec<_>>();
         let a = MatrixBlock::new(a, idx);
 
-        LinearFactor::new(self.keys.clone(), a, b)
+        Ok(LinearFactor::new(self.keys.clone(), a, b))
     }
 
     /// Get the keys of the factor.
     pub fn keys(&self) -> &[Key] {
         &self.keys
+    }
+
+    fn validate_noise_dim(&self, residual_dim: usize) -> Result<(), ResidualError> {
+        let noise_dim = self.noise.dim();
+        if noise_dim == 0 || noise_dim == residual_dim {
+            Ok(())
+        } else {
+            Err(ResidualError::NoiseDimensionMismatch {
+                expected: residual_dim,
+                actual: noise_dim,
+            })
+        }
+    }
+
+    fn validate_linearization(
+        &self,
+        values: &Values,
+        residual_dim: usize,
+        jac_rows: usize,
+        jac_cols: usize,
+    ) -> Result<(), ResidualError> {
+        self.validate_noise_dim(residual_dim)?;
+        let expected_cols = self.keys.iter().try_fold(0, |dim, key| {
+            values
+                .get_raw(*key)
+                .map(|value| dim + value.dim())
+                .ok_or(ResidualError::MissingKey(*key))
+        })?;
+        if jac_rows == residual_dim && jac_cols == expected_cols {
+            Ok(())
+        } else {
+            Err(ResidualError::JacobianShapeMismatch {
+                expected_rows: residual_dim,
+                actual_rows: jac_rows,
+                expected_cols,
+                actual_cols: jac_cols,
+            })
+        }
     }
 }
 
@@ -183,118 +238,51 @@ impl<KF: KeyFormatter> fmt::Debug for FactorFormatter<'_, KF> {
 
 /// Builder for a factor.
 ///
-/// If the noise model or robust kernel aren't set, they default to [UnitNoise]
-/// and [L2] respectively.
-pub struct FactorBuilder<const DIM_OUT: usize> {
+/// If the noise model or robust kernel aren't set, they default to
+/// [UnitNoiseDyn] and [L2] respectively.
+pub struct FactorBuilder {
     keys: Vec<Key>,
-    residual: Box<dyn Residual>,
+    residual: Box<dyn ErasedResidual>,
     noise: Option<Box<dyn NoiseModel>>,
     robust: Option<Box<dyn RobustCost>>,
 }
 
-macro_rules! impl_new_builder {
-    ($($num:expr, $( ($key:ident, $key_type:ident, $var:ident) ),*);* $(;)?) => {$(
-        paste::paste! {
-            #[doc = "Create a new factor with " $num " variable connections, while verifying the key types."]
-            pub fn [<new $num>]<R, $($key_type),*>(residual: R, $($key: $key_type),*) -> Self
-            where
-                R: crate::residuals::[<Residual $num>]<DimOut = Const<DIM_OUT>> + Residual + 'static,
-                $(
-                    $key_type: TypedSymbol<R::$var>,
-                )*
-            {
-                Self {
-                    keys: vec![$( $key.into() ),*],
-                    residual: Box::new(residual),
-                    noise: None,
-                    robust: None,
-                }
-            }
-
-            #[doc = "Create a new factor with " $num " variable connections, without verifying the key types."]
-            pub fn [<new $num _unchecked>]<R, $($key_type),*>(residual: R, $($key: $key_type),*) -> Self
-            where
-                R: crate::residuals::[<Residual $num>]<DimOut = Const<DIM_OUT>> + Residual + 'static,
-                $(
-                    $key_type: Symbol,
-                )*
-            {
-                Self {
-                    keys: vec![$( $key.into() ),*],
-                    residual: Box::new(residual),
-                    noise: None,
-                    robust: None,
-                }
-            }
-        }
-    )*};
-}
-
-impl<const DIM_OUT: usize> FactorBuilder<DIM_OUT> {
-    impl_new_builder! {
-        1, (key1, K1, V1);
-        2, (key1, K1, V1), (key2, K2, V2);
-        3, (key1, K1, V1), (key2, K2, V2), (key3, K3, V3);
-        4, (key1, K1, V1), (key2, K2, V2), (key3, K3, V3), (key4, K4, V4);
-        5, (key1, K1, V1), (key2, K2, V2), (key3, K3, V3), (key4, K4, V4), (key5, K5, V5);
-        6, (key1, K1, V1), (key2, K2, V2), (key3, K3, V3), (key4, K4, V4), (key5, K5, V5), (key6, K6, V6);
-    }
-
-    /// Add a noise model to the factor.
-    pub fn noise<N>(mut self, noise: N) -> Self
+impl FactorBuilder {
+    /// Create a typed factor while verifying key types at compile time.
+    pub fn new<R, K>(residual: R, keys: K) -> Self
     where
-        N: 'static + NoiseModel<Dim = Const<DIM_OUT>> + NoiseModel,
+        R: Residual + ErasedResidual + 'static,
+        K: FactorInput<R::Input>,
     {
-        self.noise = Some(Box::new(noise));
-        self
-    }
-
-    /// Add a robust kernel to the factor.
-    pub fn robust<C>(mut self, robust: C) -> Self
-    where
-        C: 'static + RobustCost,
-    {
-        self.robust = Some(Box::new(robust));
-        self
-    }
-
-    /// Build the factor.
-    pub fn build(self) -> Factor
-    where
-        UnitNoise<DIM_OUT>: NoiseModel,
-    {
-        let noise = self.noise.unwrap_or_else(|| Box::new(UnitNoise::<DIM_OUT>));
-        let robust = self.robust.unwrap_or_else(|| Box::new(L2));
-        Factor {
-            keys: self.keys.to_vec(),
-            residual: self.residual,
-            noise,
-            robust,
-        }
-    }
-}
-
-/// Builder for a factor with a dynamic number of residuals.
-///
-/// If the noise model or robust kernel aren't set, they default to [UnitNoise]
-/// and [L2] respectively.
-pub struct FactorBuilderDyn {
-    keys: Vec<Key>,
-    residual: Box<dyn Residual>,
-    noise: Option<Box<dyn NoiseModel>>,
-    robust: Option<Box<dyn RobustCost>>,
-}
-
-impl FactorBuilderDyn {
-    pub fn new<R, K, I>(residual: R, keys: I) -> Self
-    where
-        R: Residual + 'static,
-        K: Symbol,
-        I: IntoIterator<Item = K>,
-    {
-        let keys = keys.into_iter().map(Into::into).collect();
         Self {
-            keys,
+            keys: keys.into_keys(),
+            residual: Box::new(residual),
+            noise: None,
+            robust: None,
+        }
+    }
+
+    /// Create a typed factor without compile-time key type validation.
+    pub fn new_unchecked<R, K>(residual: R, keys: K) -> Self
+    where
+        R: Residual + ErasedResidual + 'static,
+        K: KeyPack,
+    {
+        Self {
+            keys: keys.into_keys(),
+            residual: Box::new(residual),
+            noise: None,
+            robust: None,
+        }
+    }
+
+    /// Create a dynamic factor from a dynamic residual and key pack.
+    pub fn new_dyn<R>(residual: R, input: DynVarPack) -> Self
+    where
+        R: DynResidual + ErasedResidual + 'static,
+    {
+        Self {
+            keys: input.into_keys(),
             residual: Box::new(residual),
             noise: None,
             robust: None,
@@ -304,7 +292,7 @@ impl FactorBuilderDyn {
     /// Add a noise model to the factor.
     pub fn noise<N>(mut self, noise: N) -> Self
     where
-        N: 'static + NoiseModel<Dim = Dyn> + NoiseModel,
+        N: 'static + NoiseModel,
     {
         self.noise = Some(Box::new(noise));
         self
@@ -320,16 +308,13 @@ impl FactorBuilderDyn {
     }
 
     /// Build the factor.
-    pub fn build(self) -> Factor
-    where
-        UnitNoiseDyn: NoiseModel,
-    {
+    pub fn build(self) -> Factor {
         let noise = self
             .noise
-            .unwrap_or_else(|| Box::new(UnitNoiseDyn::new(self.residual.dim_out())));
+            .unwrap_or_else(|| Box::new(UnitNoiseDyn::default()));
         let robust = self.robust.unwrap_or_else(|| Box::new(L2));
         Factor {
-            keys: self.keys.to_vec(),
+            keys: self.keys,
             residual: self.residual,
             noise,
             robust,

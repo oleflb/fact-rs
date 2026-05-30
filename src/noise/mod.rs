@@ -33,7 +33,7 @@ dyn_clone::clone_trait_object!(NoiseModel);
 pub use register_noisemodel as tag_noise;
 
 mod gaussian;
-pub use gaussian::GaussianNoise;
+pub use gaussian::{GaussianNoise, GaussianNoiseDyn};
 
 mod unit;
 pub use unit::{UnitNoise, UnitNoiseDyn};

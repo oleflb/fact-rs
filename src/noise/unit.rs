@@ -40,15 +40,17 @@ impl<const N: usize> fmt::Display for UnitNoise<N> {
 ///
 /// Represents a noise model that does not modify the input, or equal weighting
 /// in a [factor](crate::containers::Factor).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct UnitNoiseDyn {
-    dimension: usize,
+    dimension: Option<usize>,
 }
 
 impl UnitNoiseDyn {
     pub fn new(dimension: usize) -> Self {
-        Self { dimension }
+        Self {
+            dimension: Some(dimension),
+        }
     }
 }
 
@@ -57,14 +59,20 @@ impl NoiseModel for UnitNoiseDyn {
     type Dim = Dyn;
 
     fn dim(&self) -> usize {
-        self.dimension
+        self.dimension.unwrap_or(0)
     }
 
     fn whiten_vec(&self, v: VectorX) -> VectorX {
+        if let Some(dimension) = self.dimension {
+            assert_eq!(dimension, v.len(), "UnitNoiseDyn dimension mismatch");
+        }
         v
     }
 
     fn whiten_mat(&self, m: MatrixX) -> MatrixX {
+        if let Some(dimension) = self.dimension {
+            assert_eq!(dimension, m.nrows(), "UnitNoiseDyn dimension mismatch");
+        }
         m
     }
 }

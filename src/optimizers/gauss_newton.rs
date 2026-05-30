@@ -74,7 +74,7 @@ impl Optimizer for GaussNewton {
         // Precompute the sparsity pattern
         self.graph_order = Some(
             self.graph
-                .sparsity_pattern(ValuesOrder::from_values(_values)),
+                .sparsity_pattern(_values, ValuesOrder::from_values(_values)),
         );
 
         Vec::new()

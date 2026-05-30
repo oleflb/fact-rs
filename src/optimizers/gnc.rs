@@ -246,7 +246,7 @@ impl<K: ConvexableKernel + 'static, O: Optimizer> Optimizer for GraduatedNonConv
             .graph()
             .iter()
             .map(|f| {
-                ChiSquared::new(f.dim_out() as f64)
+                ChiSquared::new(f.dim_out(values) as f64)
                     .expect("")
                     .inverse_cdf(self.params.percentile as f64) as dtype
             })

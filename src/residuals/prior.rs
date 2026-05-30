@@ -2,7 +2,7 @@ use crate::{
     linalg::{
         AllocatorBuffer, DefaultAllocator, DualAllocator, DualVector, ForwardProp, Numeric, VectorX,
     },
-    residuals::Residual1,
+    residuals::{FixedOutputDim, Residual},
     variables::{Variable, VariableDtype},
 };
 
@@ -26,21 +26,26 @@ impl<P: VariableDtype> PriorResidual<P> {
 }
 
 #[factrs::mark]
-impl<P> Residual1 for PriorResidual<P>
+impl<P> Residual for PriorResidual<P>
 where
     P: VariableDtype + 'static + Send,
     AllocatorBuffer<P::Dim>: Sync + Send,
     DefaultAllocator: DualAllocator<P::Dim>,
     DualVector<P::Dim>: Copy,
 {
+    type Input = P;
     type Differ = ForwardProp<P::Dim>;
-    type V1 = P;
-    type DimIn = P::Dim;
-    type DimOut = P::Dim;
 
-    fn residual1<T: Numeric>(&self, v: <Self::V1 as Variable>::Alias<T>) -> VectorX<T> {
+    fn residual<T: Numeric>(&self, v: <P as Variable>::Alias<T>) -> VectorX<T> {
         self.prior.cast::<T>().ominus(&v)
     }
+}
+
+impl<P> FixedOutputDim for PriorResidual<P>
+where
+    P: VariableDtype + 'static + Send,
+{
+    type DimOut = P::Dim;
 }
 
 #[cfg(test)]
@@ -81,14 +86,19 @@ mod test {
         let x1 = P::identity();
         let mut values = Values::new();
         values.insert_unchecked(X(0), x1.clone());
-        let jac = prior_residual
-            .residual1_jacobian(&values, &[X(0).into()])
-            .diff;
+        let jac = crate::residuals::ErasedResidual::residual_jacobian(
+            &prior_residual,
+            &values,
+            &[X(0).into()],
+        )
+        .expect("prior residual should linearize")
+        .diff;
 
         let f = |v: P| {
             let mut vals = Values::new();
             vals.insert_unchecked(X(0), v.clone());
-            Residual1::residual1_values(&prior_residual, &vals, &[X(0).into()])
+            crate::residuals::ErasedResidual::residual(&prior_residual, &vals, &[X(0).into()])
+                .expect("prior residual should evaluate")
         };
         let jac_n = NumericalDiff::<PWR>::jacobian_1(f, &x1).diff;
 

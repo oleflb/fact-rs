@@ -13,4 +13,4 @@ mod graph;
 pub use graph::{Graph, GraphFormatter, GraphOrder};
 
 mod factor;
-pub use factor::{Factor, FactorBuilder, FactorBuilderDyn, FactorFormatter};
+pub use factor::{Factor, FactorBuilder, FactorFormatter};

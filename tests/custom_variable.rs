@@ -76,7 +76,7 @@ factrs::test_variable!(MyVar);
 mod ser_de {
     use factrs::{
         assert_variable_eq, containers::Values, residuals::PriorResidual, symbols::X,
-        traits::Residual, variables::VariableSafe,
+        traits::ErasedResidual, variables::VariableSafe,
     };
 
     use super::*;
@@ -102,7 +102,7 @@ mod ser_de {
     // Make sure the prior can as well
     #[test]
     fn test_prior_serialize() {
-        let trait_object = &PriorResidual::new(MyVar::new(2.3)) as &dyn Residual;
+        let trait_object = &PriorResidual::new(MyVar::new(2.3)) as &dyn ErasedResidual;
         let json = serde_json::to_string(trait_object).unwrap();
         let expected = r#"{"tag":"PriorResidual<MyVar>","prior":{"val":[2.3]}}"#;
         println!("json: {json}");
@@ -112,14 +112,15 @@ mod ser_de {
     #[test]
     fn test_prior_deserialize() {
         let json = r#"{"tag":"PriorResidual<MyVar>","prior":{"val":[1.2]}}"#;
-        let trait_object: Box<dyn Residual> = serde_json::from_str(json).unwrap();
+        let trait_object: Box<dyn ErasedResidual> = serde_json::from_str(json).unwrap();
 
         let mut values = Values::new();
         values.insert_unchecked(X(0), MyVar::new(1.2));
-        let error = trait_object.residual(&values, &[X(0).into()])[0];
+        let keys = [X(0).into()];
+        let error = trait_object.residual(&values, &keys).unwrap()[0];
 
-        assert_eq!(trait_object.dim_in(), 1);
-        assert_eq!(trait_object.dim_out(), 1);
+        assert_eq!(trait_object.dim_in(&values, &keys).unwrap(), 1);
+        assert_eq!(trait_object.dim_out(&values, &keys).unwrap(), 1);
         assert_eq!(error, 0.0);
     }
 }

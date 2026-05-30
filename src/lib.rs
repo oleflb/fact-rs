@@ -105,10 +105,10 @@ extern crate self as factrs;
 /// Additionally, there is a number of helper options for specifying a noise
 /// model,
 /// ```
-/// # use factrs::{assign_symbols, fac, core::{SO2, PriorResidual, GaussianNoise}, traits::*};
+/// # use factrs::{assign_symbols, fac, core::{SO2, PriorResidual, GaussianNoiseDyn}, traits::*};
 /// # let prior = PriorResidual::new(SO2::identity());
 /// # assign_symbols!(X: SO2);
-/// let noise = GaussianNoise::from_scalar_sigma(0.1);
+/// let noise = GaussianNoiseDyn::from_scalar_sigma(0.1);
 /// let f1a = fac![prior, X(0), noise];
 /// # let prior = PriorResidual::new(SO2::identity());
 /// let f1b = fac![prior, X(0), 0.1 as std];
@@ -118,7 +118,7 @@ extern crate self as factrs;
 /// let f3 = fac![prior, X(0), (0.1, 0.3) as std];
 /// ```
 /// where `f1a` and `f1b` are identical, and where `f3` uses
-/// [from_split_sigma](factrs::noise::GaussianNoise::from_split_sigma)
+/// [from_split_sigma](factrs::noise::GaussianNoiseDyn::from_split_sigma)
 /// to specify the rotation and translation noise separately. (where rotation is
 /// ALWAYS first in factrs)
 ///
@@ -154,9 +154,9 @@ pub use factrs_proc::fac;
 ///   [BetweenResidual\<Type\>](factrs::core::BetweenResidual) as well.
 ///
 /// ### [Residual](factrs::traits::Residual)
-/// This should be applied on a numbered residual such as
-/// [Residual2](factrs::residuals::Residual2) and will automatically derive
-/// [Residual](factrs::traits::Residual). Additionally, if serde is
+/// This should be applied on a [Residual](factrs::traits::Residual) impl and
+/// will automatically derive the erased residual storage implementation.
+/// Additionally, if serde is
 /// enabled, it will add a tag for serialization.
 ///
 /// ### [Noise](factrs::traits::NoiseModel)
@@ -199,8 +199,12 @@ pub mod symbols {
 /// ```
 pub mod traits {
     pub use crate::{
-        linalg::Diff, noise::NoiseModel, optimizers::Optimizer, residuals::Residual,
-        robust::RobustCost, variables::Variable,
+        linalg::Diff,
+        noise::NoiseModel,
+        optimizers::Optimizer,
+        residuals::{DynResidual, ErasedResidual, Residual, VarPack},
+        robust::RobustCost,
+        variables::Variable,
     };
 }
 
@@ -218,9 +222,9 @@ pub mod core {
         containers::{Factor, Graph, Values},
         fac,
         linalg::{Vector1, Vector2, Vector3},
-        noise::{GaussianNoise, UnitNoise, UnitNoiseDyn},
+        noise::{GaussianNoise, GaussianNoiseDyn, UnitNoise, UnitNoiseDyn},
         optimizers::{GaussNewton, LevenMarquardt},
-        residuals::{BetweenResidual, PriorResidual},
+        residuals::{BetweenResidual, DynVarPack, PriorResidual},
         robust::{GemanMcClure, Huber, L2},
         variables::{SE2, SE3, SO2, SO3, VectorVar, VectorVar1, VectorVar2, VectorVar3},
     };

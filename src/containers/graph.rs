@@ -33,7 +33,7 @@ use crate::{containers::Factor, dtype, linear::LinearGraph};
 ///    variables::SO2,
 /// };
 /// # assign_symbols!(X: SO2);
-/// # let factor = FactorBuilder::new1(PriorResidual::new(SO2::identity()), X(0)).build();
+/// # let factor = FactorBuilder::new(PriorResidual::new(SO2::identity()), X(0)).build();
 /// let mut graph = Graph::new();
 /// graph.add_factor(factor);
 /// ```
@@ -79,15 +79,15 @@ impl Graph {
         LinearGraph::from_vec(factors)
     }
 
-    pub fn sparsity_pattern(&self, order: ValuesOrder) -> GraphOrder {
-        let total_rows = self.factors.iter().map(|f| f.dim_out()).sum();
+    pub fn sparsity_pattern(&self, values: &Values, order: ValuesOrder) -> GraphOrder {
+        let total_rows = self.factors.iter().map(|f| f.dim_out(values)).sum();
         let total_columns = order.dim();
 
         let mut indices = Vec::<Pair<usize, usize>>::new();
 
         let _ = self.factors.iter().fold(0, |row, f| {
             f.keys().iter().for_each(|key| {
-                (0..f.dim_out()).for_each(|i| {
+                (0..f.dim_out(values)).for_each(|i| {
                     let Idx {
                         idx: col,
                         dim: col_dim,
@@ -97,7 +97,7 @@ impl Graph {
                     });
                 });
             });
-            row + f.dim_out()
+            row + f.dim_out(values)
         });
 
         let (sparsity_pattern, sparsity_order) =

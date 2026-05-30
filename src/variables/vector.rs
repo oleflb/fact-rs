@@ -74,7 +74,7 @@ impl<const N: usize, T: Numeric> Variable for VectorVar<N, T> {
 const _: () = {
     use factrs::{
         core::{BetweenResidual, PriorResidual},
-        residuals::Residual,
+        residuals::ErasedResidual,
         variables::VariableSafe,
     };
 

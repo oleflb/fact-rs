@@ -4,7 +4,7 @@ use crate::{
     dtype,
     linalg::{Const, ForwardProp, Matrix, Matrix3, VectorX},
     noise::GaussianNoise,
-    residuals::Residual6,
+    residuals::{FixedOutputDim, Residual},
     variables::{ImuBias, MatrixLieGroup, SE3, SO3, Variable, VectorVar3},
 };
 // ------------------------- Covariances ------------------------- //
@@ -243,7 +243,7 @@ impl ImuPreintegrator {
         // Create the residual
         let res = ImuPreintegrationResidual { delta: self.delta };
         // Build the factor
-        FactorBuilder::new6(res, x1, v1, b1, x2, v2, b2)
+        FactorBuilder::new(res, (x1, v1, b1, x2, v2, b2))
             .noise(noise)
             .build()
     }
@@ -275,7 +275,7 @@ impl ImuPreintegrator {
         // Create the residual
         let res = ImuPreintegrationResidual { delta: self.delta };
         // Build the factor
-        FactorBuilder::new6_unchecked(res, x1, v1, b1, x2, v2, b2)
+        FactorBuilder::new_unchecked(res, (x1, v1, b1, x2, v2, b2))
             .noise(noise)
             .build()
     }
@@ -290,25 +290,20 @@ pub struct ImuPreintegrationResidual {
 }
 
 #[factrs::mark]
-impl Residual6 for ImuPreintegrationResidual {
+impl Residual for ImuPreintegrationResidual {
+    type Input = (SE3, VectorVar3, ImuBias, SE3, VectorVar3, ImuBias);
     type Differ = ForwardProp<Const<30>>;
-    type DimIn = Const<30>;
-    type DimOut = Const<15>;
-    type V1 = SE3;
-    type V2 = VectorVar3;
-    type V3 = ImuBias;
-    type V4 = SE3;
-    type V5 = VectorVar3;
-    type V6 = ImuBias;
 
-    fn residual6<T: crate::linalg::Numeric>(
+    fn residual<T: crate::linalg::Numeric>(
         &self,
-        x1: SE3<T>,
-        v1: VectorVar3<T>,
-        b1: ImuBias<T>,
-        x2: SE3<T>,
-        v2: VectorVar3<T>,
-        b2: ImuBias<T>,
+        (x1, v1, b1, x2, v2, b2): (
+            SE3<T>,
+            VectorVar3<T>,
+            ImuBias<T>,
+            SE3<T>,
+            VectorVar3<T>,
+            ImuBias<T>,
+        ),
     ) -> VectorX<T> {
         // Add dual types to all of our fields
         let delta = &self.delta.cast();
@@ -347,6 +342,10 @@ impl Residual6 for ImuPreintegrationResidual {
 
         residual
     }
+}
+
+impl FixedOutputDim for ImuPreintegrationResidual {
+    type DimOut = Const<15>;
 }
 
 #[cfg(test)]

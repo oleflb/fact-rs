@@ -4,7 +4,7 @@ use crate::{
     linalg::{
         AllocatorBuffer, DefaultAllocator, DualAllocator, DualVector, ForwardProp, Numeric, VectorX,
     },
-    residuals::Residual2,
+    residuals::{FixedOutputDim, Residual},
     variables::{Variable, VariableDtype},
 };
 
@@ -31,21 +31,22 @@ impl<P: Variable> BetweenResidual<P> {
 }
 
 #[factrs::mark]
-impl<P: VariableDtype + 'static> Residual2 for BetweenResidual<P>
+impl<P: VariableDtype + 'static> Residual for BetweenResidual<P>
 where
     AllocatorBuffer<DimNameSum<P::Dim, P::Dim>>: Sync + Send,
     DefaultAllocator: DualAllocator<DimNameSum<P::Dim, P::Dim>>,
     DualVector<DimNameSum<P::Dim, P::Dim>>: Copy,
     P::Dim: DimNameAdd<P::Dim>,
 {
+    type Input = (P, P);
     type Differ = ForwardProp<DimNameSum<P::Dim, P::Dim>>;
-    type V1 = P;
-    type V2 = P;
-    type DimOut = P::Dim;
-    type DimIn = DimNameSum<P::Dim, P::Dim>;
 
-    fn residual2<T: Numeric>(&self, v1: P::Alias<T>, v2: P::Alias<T>) -> VectorX<T> {
+    fn residual<T: Numeric>(&self, (v1, v2): (P::Alias<T>, P::Alias<T>)) -> VectorX<T> {
         let delta = self.delta.cast::<T>();
         v1.compose(&delta).ominus(&v2)
     }
+}
+
+impl<P: VariableDtype + 'static> FixedOutputDim for BetweenResidual<P> {
+    type DimOut = P::Dim;
 }

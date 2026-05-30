@@ -76,25 +76,25 @@ fn tag_all(kind: &TokenStream2, name: &str) -> TokenStream2 {
 
         // Prior
         typetag::__private::inventory::submit! {
-            <dyn factrs::residuals::Residual>::typetag_register(
+            <dyn factrs::residuals::ErasedResidual>::typetag_register(
                 #name_prior,
                 (|deserializer| typetag::__private::Result::Ok(
                     typetag::__private::Box::new(
                         typetag::__private::erased_serde::deserialize::<factrs::residuals::PriorResidual<#kind>>(deserializer)?
                     ),
-                )) as typetag::__private::DeserializeFn<<dyn factrs::residuals::Residual as typetag::__private::Strictest>::Object>,
+                )) as typetag::__private::DeserializeFn<<dyn factrs::residuals::ErasedResidual as typetag::__private::Strictest>::Object>,
             )
         }
 
         // Between
         typetag::__private::inventory::submit! {
-            <dyn factrs::residuals::Residual>::typetag_register(
+            <dyn factrs::residuals::ErasedResidual>::typetag_register(
                 #name_between,
                 (|deserializer| typetag::__private::Result::Ok(
                     typetag::__private::Box::new(
                         typetag::__private::erased_serde::deserialize::<factrs::residuals::BetweenResidual<#kind>>(deserializer)?
                     ),
-                )) as typetag::__private::DeserializeFn<<dyn factrs::residuals::Residual as typetag::__private::Strictest>::Object>,
+                )) as typetag::__private::DeserializeFn<<dyn factrs::residuals::ErasedResidual as typetag::__private::Strictest>::Object>,
             )
         }
     }

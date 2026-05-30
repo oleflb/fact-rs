@@ -112,7 +112,7 @@ impl Optimizer for LevenMarquardt {
         // Precompute the sparsity pattern
         self.graph_order = Some(
             self.graph
-                .sparsity_pattern(ValuesOrder::from_values(values)),
+                .sparsity_pattern(values, ValuesOrder::from_values(values)),
         );
 
         vec!["   Lambda   ", "  Fidelity  "]
