@@ -112,20 +112,16 @@ impl<T: Numeric> Variable for SE23<T> {
             (self.uvw, self.xyz)
         } else {
             let w2 = xi_theta.norm_squared();
-            let B;
-            let C;
+            let D;
             if w2 < T::from(1e-5) {
-                B = T::from(0.5);
-                C = T::from(1.0 / 6.0);
+                D = T::from(1.0 / 12.0);
             } else {
                 let w = w2.sqrt();
-                let A = w.sin() / w;
-                B = (T::from(1.0) - w.cos()) / w2;
-                C = (T::from(1.0) - A) / w2;
+                D = T::from(1.0) / w2 - (T::from(1.0) + w.cos()) / (T::from(2.0) * w * w.sin());
             }
             let I = Matrix3::identity();
             let wx = SO3::hat(xi_theta.as_view());
-            let V_inv = I - wx * B + wx * wx * C;
+            let V_inv = I - wx * T::from(0.5) + wx * wx * D;
             (V_inv * self.uvw, V_inv * self.xyz)
         };
 
@@ -298,9 +294,17 @@ impl<T: Numeric> fmt::Debug for SE23<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_lie, test_variable};
+    use crate::{linalg::vectorx, test_lie, test_variable};
 
     test_variable!(SE23);
 
     test_lie!(SE23);
+
+    #[test]
+    fn log_exp_roundtrip() {
+        let xi = vectorx![0.1, 0.2, 0.3, 0.4, -0.5, 0.6, -0.7, 0.8, 0.9];
+        let got = SE23::exp(xi.as_view()).log();
+
+        matrixcompare::assert_matrix_eq!(got, xi, comp = abs, tol = 1e-12);
+    }
 }
