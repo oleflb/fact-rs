@@ -18,6 +18,11 @@ pub struct LinearGraph {
     factors: Vec<LinearFactor>,
 }
 
+pub struct OrderedLinearGraph<'a> {
+    graph: LinearGraph,
+    order: &'a GraphOrder,
+}
+
 impl LinearGraph {
     pub fn new() -> Self {
         Self::default()
@@ -29,6 +34,10 @@ impl LinearGraph {
 
     pub fn add_factor(&mut self, factor: LinearFactor) {
         self.factors.push(factor);
+    }
+
+    pub fn with_order(self, order: &GraphOrder) -> OrderedLinearGraph<'_> {
+        OrderedLinearGraph { graph: self, order }
     }
 
     pub fn error(&self, values: &LinearValues) -> dtype {
@@ -69,16 +78,31 @@ impl LinearGraph {
             sparsity_order,
         }
     }
+}
+
+impl OrderedLinearGraph<'_> {
+    pub fn error(&self, values: &LinearValues) -> dtype {
+        self.graph.error(values)
+    }
+
+    pub fn graph(&self) -> &LinearGraph {
+        &self.graph
+    }
+
+    pub fn order(&self) -> &GraphOrder {
+        self.order
+    }
+
+    pub fn into_inner(self) -> LinearGraph {
+        self.graph
+    }
 
     /// Computes J and r for use in solver
-    pub fn residual_jacobian(
-        &self,
-        graph_order: &GraphOrder,
-    ) -> DiffResult<faer::Mat<dtype>, SparseColMat<usize, dtype>> {
+    pub fn residual_jacobian(&self) -> DiffResult<faer::Mat<dtype>, SparseColMat<usize, dtype>> {
         // Create the residual vector
-        let total_rows = self.factors.iter().map(|f| f.dim_out()).sum();
+        let total_rows = self.graph.factors.iter().map(|f| f.dim_out()).sum();
         let mut r = faer::Mat::zeros(total_rows, 1);
-        let _ = self.factors.iter().fold(0, |row, f| {
+        let _ = self.graph.factors.iter().fold(0, |row, f| {
             r.subrows_mut(row, f.dim_out())
                 .copy_from(&f.b.view_range(.., ..).into_faer());
             row + f.dim_out()
@@ -87,7 +111,7 @@ impl LinearGraph {
         // Create the jacobian matrix
         let mut values: Vec<dtype> = Vec::new();
         // Iterate over all factors
-        let _ = self.factors.iter().fold(0, |row, f| {
+        let _ = self.graph.factors.iter().fold(0, |row, f| {
             // Iterate over keys
             (0..f.keys.len()).for_each(|idx| {
                 // Iterate over rows, then column elements
@@ -101,8 +125,8 @@ impl LinearGraph {
         });
 
         let jac = SparseColMat::new_from_argsort(
-            graph_order.sparsity_pattern.clone(),
-            &graph_order.sparsity_order,
+            self.order.sparsity_pattern.clone(),
+            &self.order.sparsity_order,
             values.as_slice(),
         )
         .expect("Failed to form sparse matrix from previous sparsity pattern");
@@ -160,7 +184,8 @@ mod test {
 
         // Compute the residual and jacobian
         let graph_order = graph.sparsity_pattern(order);
-        let DiffResult { value, diff } = graph.residual_jacobian(&graph_order);
+        let graph = graph.with_order(&graph_order);
+        let DiffResult { value, diff } = graph.residual_jacobian();
         let value = value.as_ref().into_nalgebra().clone_owned();
         let diff = diff.to_dense().as_ref().into_nalgebra().clone_owned();
 

@@ -4,7 +4,7 @@ mod factor;
 pub use factor::LinearFactor;
 
 mod graph;
-pub use graph::LinearGraph;
+pub use graph::{LinearGraph, OrderedLinearGraph};
 
 mod values;
 pub use values::LinearValues;

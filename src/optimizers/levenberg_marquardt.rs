@@ -133,8 +133,9 @@ impl Optimizer for LevenMarquardt {
 
         // Form the linear system
         let linear_graph = self.graph.linearize(&values);
-        let DiffResult { value: r, diff: j } =
-            linear_graph.residual_jacobian(self.graph_order.as_ref().expect("Missing graph order"));
+        let ordered =
+            linear_graph.with_order(self.graph_order.as_ref().expect("Missing graph order"));
+        let DiffResult { value: r, diff: j } = ordered.residual_jacobian();
 
         // Form A
         let jtj = j
@@ -165,7 +166,7 @@ impl Optimizer for LevenMarquardt {
         let b = j.as_ref().transpose().mul(&r);
 
         let mut dx = LinearValues::zero_from_order(order.clone());
-        let old_lin_error = linear_graph.error(&dx);
+        let old_lin_error = ordered.error(&dx);
         let old_error = self.graph.error(&values);
         let mut model_fidelity;
 
@@ -193,7 +194,7 @@ impl Optimizer for LevenMarquardt {
             );
 
             // Update our cost
-            let curr_lin_error = linear_graph.error(&dx);
+            let curr_lin_error = ordered.error(&dx);
 
             if curr_lin_error < old_lin_error {
                 let mut new_values = values.clone();

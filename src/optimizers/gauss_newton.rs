@@ -87,8 +87,9 @@ impl Optimizer for GaussNewton {
     fn step(&mut self, mut values: Values, _idx: usize) -> OptResult<(Values, String)> {
         // Solve the linear system
         let linear_graph = self.graph.linearize(&values);
-        let DiffResult { value: r, diff: j } =
-            linear_graph.residual_jacobian(self.graph_order.as_ref().expect("Missing graph order"));
+        let ordered =
+            linear_graph.with_order(self.graph_order.as_ref().expect("Missing graph order"));
+        let DiffResult { value: r, diff: j } = ordered.residual_jacobian();
 
         // Solve Ax = b
         let delta = self
