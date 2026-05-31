@@ -82,10 +82,7 @@ pub fn mark(mut item: ItemImpl) -> TokenStream2 {
                     keys: &[factrs::containers::Key],
                 ) -> Result<factrs::linalg::DiffResult<factrs::linalg::VectorX, factrs::linalg::MatrixX>, factrs::residuals::ResidualError> {
                     let input = <<Self as factrs::residuals::Residual>::Input as factrs::residuals::VarPack>::input(values, keys)?;
-                    Ok(<<Self as factrs::residuals::Residual>::Differ as factrs::linalg::Diff<<Self as factrs::residuals::Residual>::Input>>::jacobian(
-                        |input| factrs::residuals::Residual::residual(self, input),
-                        &input,
-                    ))
+                    Ok(factrs::residuals::Residual::residual_jacobian(self, input))
                 }
             }
         },
@@ -104,11 +101,10 @@ pub fn mark(mut item: ItemImpl) -> TokenStream2 {
 
                 fn dim_out(
                     &self,
-                    values: &factrs::containers::Values,
+                    _values: &factrs::containers::Values,
                     keys: &[factrs::containers::Key],
                 ) -> Result<usize, factrs::residuals::ResidualError> {
-                    let input = factrs::residuals::DynValues::new(values, keys)?;
-                    factrs::residuals::DynResidual::dim_out(self, &input)
+                    factrs::residuals::DynResidual::dim_out(self, keys)
                 }
 
                 fn residual(

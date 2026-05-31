@@ -21,6 +21,13 @@ pub trait Residual: Debug + Clone + Send + 'static {
     fn dim_out(&self) -> usize;
 
     fn residual<T: Numeric>(&self, input: <Self::Input as DiffInput>::Packed<T>) -> VectorX<T>;
+
+    fn residual_jacobian(&self, input: Self::Input) -> DiffResult<VectorX, MatrixX> {
+        <Self::Differ as Diff<Self::Input>>::jacobian(
+            |input| <Self as Residual>::residual(self, input),
+            &input,
+        )
+    }
 }
 
 /// Object-safe residual trait stored by factors.
@@ -47,7 +54,7 @@ pub use register_erasedresidual as tag_residual;
 
 /// Dynamic residuals receive values plus a runtime key pack.
 pub trait DynResidual: Debug + Clone + Send + 'static {
-    fn dim_out(&self, input: &DynValues) -> Result<usize, ResidualError>;
+    fn dim_out(&self, keys: &[Key]) -> Result<usize, ResidualError>;
 
     fn residual(&self, input: &DynValues) -> VectorX;
 
@@ -111,7 +118,7 @@ mod tests {
     use crate::{
         assign_symbols,
         containers::{FactorBuilder, Values},
-        linalg::VectorX,
+        linalg::{MatrixX, VectorX, vectorx},
         residuals::DynVarPack,
         variables::{Variable, VectorVar2, VectorVar3},
     };
@@ -124,8 +131,8 @@ mod tests {
 
     #[factrs::mark]
     impl DynResidual for DimResidual {
-        fn dim_out(&self, input: &DynValues) -> Result<usize, ResidualError> {
-            Ok(input.keys().len())
+        fn dim_out(&self, keys: &[Key]) -> Result<usize, ResidualError> {
+            Ok(keys.len())
         }
 
         fn residual(&self, input: &DynValues) -> VectorX {
@@ -166,5 +173,42 @@ mod tests {
         let linear = factor.linearize(&values);
         assert_eq!(linear.b.len(), 2);
         assert_eq!(linear.a.mat().shape(), (2, 5));
+    }
+
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    struct AnalyticResidual;
+
+    #[factrs::mark]
+    impl Residual for AnalyticResidual {
+        type Input = VectorVar2;
+        type Differ = crate::linalg::ForwardProp;
+
+        fn dim_out(&self) -> usize {
+            1
+        }
+
+        fn residual<T: Numeric>(&self, input: crate::variables::VectorVar<2, T>) -> VectorX<T> {
+            vectorx![input.0[0] + T::from(2.0) * input.0[1]]
+        }
+
+        fn residual_jacobian(&self, input: VectorVar2) -> DiffResult<VectorX, MatrixX> {
+            DiffResult {
+                value: <Self as Residual>::residual(self, input),
+                diff: MatrixX::from_row_slice(1, 2, &[10.0, 20.0]),
+            }
+        }
+    }
+
+    #[test]
+    fn typed_residual_uses_analytic_jacobian_override() {
+        let mut values = Values::new();
+        values.insert(X(0), VectorVar2::new(1.0, 2.0));
+        let factor = FactorBuilder::new(AnalyticResidual, X(0)).build();
+
+        let linear = factor.linearize(&values);
+
+        assert_eq!(linear.a.mat(), MatrixX::from_row_slice(1, 2, &[10.0, 20.0]));
+        assert_eq!(linear.b, vectorx![-5.0]);
     }
 }
