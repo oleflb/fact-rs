@@ -3,7 +3,7 @@ use std::{any::type_name, collections::HashSet, fmt};
 use crate::{
     containers::{Key, Symbol, TypedSymbol, Values},
     linalg::Numeric,
-    variables::{Variable, VariableDtype},
+    variables::{Variable, VariableDtype, VariableSafe},
 };
 
 /// Errors produced while building or evaluating residual inputs.
@@ -171,6 +171,65 @@ pub struct DynVarPack {
     keys: Vec<Key>,
 }
 
+/// Local values referenced by a dynamic residual.
+///
+/// Dynamic residuals operate on this factor-local view so numerical
+/// differentiation only clones and perturbs variables used by the factor.
+#[derive(Clone, Debug)]
+pub struct DynValues {
+    keys: Vec<Key>,
+    values: Vec<Box<dyn VariableSafe>>,
+}
+
+impl DynValues {
+    pub fn new(values: &Values, keys: &[Key]) -> Result<Self, ResidualError> {
+        check_duplicate_keys(keys)?;
+        let values = keys
+            .iter()
+            .map(|key| {
+                values
+                    .get_raw(*key)
+                    .map(|value| value.clone_box())
+                    .ok_or(ResidualError::MissingKey(*key))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self {
+            keys: keys.to_vec(),
+            values,
+        })
+    }
+
+    pub fn keys(&self) -> &[Key] {
+        &self.keys
+    }
+
+    pub fn get_raw(&self, key: Key) -> Option<&dyn VariableSafe> {
+        self.keys
+            .iter()
+            .position(|k| *k == key)
+            .map(|idx| self.values[idx].as_ref())
+    }
+
+    pub fn get_raw_mut(&mut self, key: Key) -> Option<&mut dyn VariableSafe> {
+        let idx = self.keys.iter().position(|k| *k == key)?;
+        Some(self.values[idx].as_mut())
+    }
+
+    pub fn get<V: VariableDtype + 'static>(&self, key: Key) -> Option<&V> {
+        self.get_raw(key)?.downcast_ref::<V>()
+    }
+}
+
+fn check_duplicate_keys(keys: &[Key]) -> Result<(), ResidualError> {
+    let mut seen = HashSet::with_capacity(keys.len());
+    for key in keys {
+        if !seen.insert(*key) {
+            return Err(ResidualError::DuplicateKey(*key));
+        }
+    }
+    Ok(())
+}
+
 impl DynVarPack {
     pub fn new<I, K>(keys: I) -> Result<Self, ResidualError>
     where
@@ -178,12 +237,7 @@ impl DynVarPack {
         K: Into<Key>,
     {
         let keys = keys.into_iter().map(Into::into).collect::<Vec<_>>();
-        let mut seen = HashSet::with_capacity(keys.len());
-        for key in &keys {
-            if !seen.insert(*key) {
-                return Err(ResidualError::DuplicateKey(*key));
-            }
-        }
+        check_duplicate_keys(&keys)?;
         Ok(Self { keys })
     }
 
@@ -430,6 +484,27 @@ mod tests {
     fn dyn_var_pack_rejects_duplicate_keys() {
         let keys: Vec<Key> = vec![X(0).into(), X(0).into()];
         let err = DynVarPack::new(keys).expect_err("duplicate key must be rejected");
+        assert_eq!(err, ResidualError::DuplicateKey(X(0).into()));
+    }
+
+    #[test]
+    fn dyn_values_rejects_missing_key() {
+        let values = Values::new();
+        let keys = vec![X(0).into()];
+
+        let err = DynValues::new(&values, &keys).expect_err("missing key must be rejected");
+
+        assert_eq!(err, ResidualError::MissingKey(X(0).into()));
+    }
+
+    #[test]
+    fn dyn_values_rejects_duplicate_keys() {
+        let mut values = Values::new();
+        values.insert(X(0), VectorVar2::identity());
+        let keys = vec![X(0).into(), X(0).into()];
+
+        let err = DynValues::new(&values, &keys).expect_err("duplicate key must be rejected");
+
         assert_eq!(err, ResidualError::DuplicateKey(X(0).into()));
     }
 

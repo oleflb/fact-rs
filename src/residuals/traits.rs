@@ -4,7 +4,7 @@ use crate::{
     containers::{Key, Values},
     dtype,
     linalg::{Diff, DiffInput, DiffResult, MatrixX, Numeric, VectorX},
-    residuals::{DynVarPack, ResidualError, VarPack},
+    residuals::{DynValues, ResidualError, VarPack},
 };
 use downcast_rs::{Downcast, impl_downcast};
 use dyn_clone::DynClone;
@@ -47,35 +47,32 @@ pub use register_erasedresidual as tag_residual;
 
 /// Dynamic residuals receive values plus a runtime key pack.
 pub trait DynResidual: Debug + Clone + Send + 'static {
-    fn residual(&self, values: &Values, input: &DynVarPack) -> VectorX;
+    fn dim_out(&self, input: &DynValues) -> Result<usize, ResidualError>;
 
-    fn residual_jacobian(
-        &self,
-        values: &Values,
-        input: &DynVarPack,
-    ) -> DiffResult<VectorX, MatrixX> {
-        numerical_jacobian_dyn(self, values, input)
+    fn residual(&self, input: &DynValues) -> VectorX;
+
+    fn residual_jacobian(&self, input: &DynValues) -> DiffResult<VectorX, MatrixX> {
+        numerical_jacobian_dyn(self, input)
     }
 }
 
 fn numerical_jacobian_dyn<R: DynResidual>(
     residual: &R,
-    values: &Values,
-    input: &DynVarPack,
+    input: &DynValues,
 ) -> DiffResult<VectorX, MatrixX> {
     let eps = dtype::powi(10.0, -6);
     let keys = input.keys();
     let dims = keys
         .iter()
         .map(|key| {
-            values
+            input
                 .get_raw(*key)
                 .unwrap_or_else(|| panic!("missing key in dynamic residual: {key:?}"))
                 .dim()
         })
         .collect::<Vec<_>>();
     let dim_total = dims.iter().sum();
-    let value = residual.residual(values, input);
+    let value = residual.residual(input);
     let mut jac = MatrixX::zeros(value.len(), dim_total);
 
     let mut col = 0;
@@ -84,20 +81,20 @@ fn numerical_jacobian_dyn<R: DynResidual>(
             let mut delta = VectorX::zeros(dim);
             delta[j] = eps;
 
-            let mut plus_values = values.clone();
+            let mut plus_values = input.clone();
             plus_values
                 .get_raw_mut(*key)
                 .unwrap_or_else(|| panic!("missing key in dynamic residual: {key:?}"))
                 .oplus_mut(delta.as_view());
-            let plus = residual.residual(&plus_values, input);
+            let plus = residual.residual(&plus_values);
 
             delta[j] = -eps;
-            let mut minus_values = values.clone();
+            let mut minus_values = input.clone();
             minus_values
                 .get_raw_mut(*key)
                 .unwrap_or_else(|| panic!("missing key in dynamic residual: {key:?}"))
                 .oplus_mut(delta.as_view());
-            let minus = residual.residual(&minus_values, input);
+            let minus = residual.residual(&minus_values);
 
             let deriv = (plus - minus) / (2.0 * eps);
             jac.column_mut(col).copy_from(&deriv);
@@ -115,6 +112,7 @@ mod tests {
         assign_symbols,
         containers::{FactorBuilder, Values},
         linalg::VectorX,
+        residuals::DynVarPack,
         variables::{Variable, VectorVar2, VectorVar3},
     };
 
@@ -126,11 +124,15 @@ mod tests {
 
     #[factrs::mark]
     impl DynResidual for DimResidual {
-        fn residual(&self, values: &Values, input: &DynVarPack) -> VectorX {
+        fn dim_out(&self, input: &DynValues) -> Result<usize, ResidualError> {
+            Ok(input.keys().len())
+        }
+
+        fn residual(&self, input: &DynValues) -> VectorX {
             VectorX::from_iterator(
                 input.keys().len(),
                 input.keys().iter().map(|key| {
-                    values
+                    input
                         .get_raw(*key)
                         .expect("dynamic residual key must exist")
                         .dim() as dtype
@@ -147,7 +149,8 @@ mod tests {
         values.insert(X(0), VectorVar2::identity());
         values.insert(Y(0), VectorVar3::identity());
 
-        let residual = DynResidual::residual(&DimResidual, &values, &input);
+        let input = DynValues::new(&values, input.keys()).expect("dynamic values");
+        let residual = DynResidual::residual(&DimResidual, &input);
         assert_eq!(residual.as_slice(), &[2.0, 3.0]);
     }
 

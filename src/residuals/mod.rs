@@ -54,7 +54,7 @@ mod var_pack;
 pub use traits::tag_residual;
 pub use traits::{DynResidual, ErasedResidual, Residual};
 pub use var_pack::{
-    DynVarPack, FactorInput, KeyPack, QueryInput, QueryKeys, ResidualError, VarPack,
+    DynValues, DynVarPack, FactorInput, KeyPack, QueryInput, QueryKeys, ResidualError, VarPack,
 };
 
 mod prior;

@@ -107,8 +107,8 @@ pub fn mark(mut item: ItemImpl) -> TokenStream2 {
                     values: &factrs::containers::Values,
                     keys: &[factrs::containers::Key],
                 ) -> Result<usize, factrs::residuals::ResidualError> {
-                    let input = factrs::residuals::DynVarPack::new(keys.to_vec())?;
-                    Ok(factrs::residuals::DynResidual::residual(self, values, &input).len())
+                    let input = factrs::residuals::DynValues::new(values, keys)?;
+                    factrs::residuals::DynResidual::dim_out(self, &input)
                 }
 
                 fn residual(
@@ -116,8 +116,8 @@ pub fn mark(mut item: ItemImpl) -> TokenStream2 {
                     values: &factrs::containers::Values,
                     keys: &[factrs::containers::Key],
                 ) -> Result<factrs::linalg::VectorX, factrs::residuals::ResidualError> {
-                    let input = factrs::residuals::DynVarPack::new(keys.to_vec())?;
-                    Ok(factrs::residuals::DynResidual::residual(self, values, &input))
+                    let input = factrs::residuals::DynValues::new(values, keys)?;
+                    Ok(factrs::residuals::DynResidual::residual(self, &input))
                 }
 
                 fn residual_jacobian(
@@ -125,8 +125,8 @@ pub fn mark(mut item: ItemImpl) -> TokenStream2 {
                     values: &factrs::containers::Values,
                     keys: &[factrs::containers::Key],
                 ) -> Result<factrs::linalg::DiffResult<factrs::linalg::VectorX, factrs::linalg::MatrixX>, factrs::residuals::ResidualError> {
-                    let input = factrs::residuals::DynVarPack::new(keys.to_vec())?;
-                    Ok(factrs::residuals::DynResidual::residual_jacobian(self, values, &input))
+                    let input = factrs::residuals::DynValues::new(values, keys)?;
+                    Ok(factrs::residuals::DynResidual::residual_jacobian(self, &input))
                 }
             }
         },
