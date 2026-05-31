@@ -157,7 +157,7 @@ macro_rules! test_lie {
             let $crate::linalg::DiffResult {
                 value: _x,
                 diff: dx,
-            } = $crate::linalg::ForwardProp::<<$var as Variable>::Dim>::jacobian_1(rotate, &t);
+            } = $crate::linalg::ForwardProp::jacobian(rotate, &t);
 
             let size =
                 <$var as $crate::variables::MatrixLieGroup>::VectorDim::try_to_usize().unwrap();

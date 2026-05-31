@@ -16,7 +16,7 @@ use factrs::{
     assign_symbols,
     core::{BetweenResidual, GaussNewton, Graph, Values},
     dtype, fac,
-    linalg::{Const, ForwardProp, Numeric, NumericalDiff, VectorX},
+    linalg::{ForwardProp, Numeric, NumericalDiff, VectorX},
     traits::*,
     variables::{SE2, VectorVar2},
 };
@@ -40,7 +40,7 @@ impl GpsResidual {
 #[factrs::mark]
 impl Residual for GpsResidual {
     // Use forward propagation for differentiation
-    type Differ = ForwardProp<Const<3>>;
+    type Differ = ForwardProp;
     // Alternatively, could use numerical differentiation (6 => 10^-6 as
     // denominator)
     // type Differ = NumericalDiff<6>;

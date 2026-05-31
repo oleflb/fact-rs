@@ -63,7 +63,8 @@ pub fn mark(mut item: ItemImpl) -> TokenStream2 {
                     values: &factrs::containers::Values,
                     keys: &[factrs::containers::Key],
                 ) -> Result<usize, factrs::residuals::ResidualError> {
-                    let input = <<Self as factrs::residuals::Residual>::Input as factrs::residuals::VarPack>::pack::<factrs::dtype>(values, keys)?;
+                    let input = <<Self as factrs::residuals::Residual>::Input as factrs::residuals::VarPack>::input(values, keys)?;
+                    let input = <<Self as factrs::residuals::Residual>::Input as factrs::linalg::DiffInput>::pack(&input);
                     Ok(factrs::residuals::Residual::residual::<factrs::dtype>(self, input).len())
                 }
 
@@ -72,7 +73,8 @@ pub fn mark(mut item: ItemImpl) -> TokenStream2 {
                     values: &factrs::containers::Values,
                     keys: &[factrs::containers::Key],
                 ) -> Result<factrs::linalg::VectorX, factrs::residuals::ResidualError> {
-                    let input = <<Self as factrs::residuals::Residual>::Input as factrs::residuals::VarPack>::pack::<factrs::dtype>(values, keys)?;
+                    let input = <<Self as factrs::residuals::Residual>::Input as factrs::residuals::VarPack>::input(values, keys)?;
+                    let input = <<Self as factrs::residuals::Residual>::Input as factrs::linalg::DiffInput>::pack(&input);
                     Ok(factrs::residuals::Residual::residual::<factrs::dtype>(self, input))
                 }
 
@@ -81,7 +83,11 @@ pub fn mark(mut item: ItemImpl) -> TokenStream2 {
                     values: &factrs::containers::Values,
                     keys: &[factrs::containers::Key],
                 ) -> Result<factrs::linalg::DiffResult<factrs::linalg::VectorX, factrs::linalg::MatrixX>, factrs::residuals::ResidualError> {
-                    <<Self as factrs::residuals::Residual>::Differ as factrs::residuals::DiffPack<<Self as factrs::residuals::Residual>::Input>>::jacobian(self, values, keys)
+                    let input = <<Self as factrs::residuals::Residual>::Input as factrs::residuals::VarPack>::input(values, keys)?;
+                    Ok(<<Self as factrs::residuals::Residual>::Differ as factrs::linalg::Diff<<Self as factrs::residuals::Residual>::Input>>::jacobian(
+                        |input| factrs::residuals::Residual::residual(self, input),
+                        &input,
+                    ))
                 }
             }
         },

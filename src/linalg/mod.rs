@@ -60,9 +60,9 @@ impl MatrixBlock {
 }
 
 // ------------------------- Derivatives ------------------------- //
-use paste::paste;
+use nalgebra::{DimNameAdd, DimNameSum};
 
-use crate::variables::VariableDtype;
+use crate::variables::{Variable, VariableDtype};
 
 /// A struct to hold the result of a differentiation operation
 #[derive(Debug, Clone)]
@@ -71,52 +71,215 @@ pub struct DiffResult<V, G> {
     pub diff: G,
 }
 
-macro_rules! fn_maker {
-    (grad, $num:expr, $( ($name:ident: $var:ident) ),*) => {
-        paste! {
-            fn [<gradient_ $num>]<$( $var: VariableDtype, )* F: Fn($($var::Alias<Self::T>,)*) -> Self::T>
-                    (f: F, $($name: &$var,)*) -> DiffResult<dtype, VectorX>{
-                    let f_wrapped = |$($name: $var::Alias<Self::T>,)*| vectorx![f($($name.clone(),)*)];
-                    let DiffResult { value, diff } = Self::[<jacobian_ $num>](f_wrapped, $($name,)*);
-                    let diff = VectorX::from_iterator(diff.len(), diff.iter().cloned());
-                    DiffResult { value: value[0], diff }
-                }
-        }
-    };
+/// Input value that can be differentiated.
+pub trait DiffInput: Clone {
+    type Packed<T: Numeric>;
 
-    (jac, $num:expr, $( ($name:ident: $var:ident) ),*) => {
-        paste! {
-            fn [<jacobian_ $num>]<$( $var: VariableDtype, )* F: Fn($($var::Alias<Self::T>,)*) -> VectorX<Self::T>>
-                    (f: F, $($name: &$var,)*) -> DiffResult<VectorX, MatrixX>;
+    fn dim(&self) -> usize;
+
+    fn pack(&self) -> Self::Packed<dtype>;
+
+    fn perturb(&self, col: usize, eps: dtype) -> Self;
+}
+
+/// Input value that can be seeded with fixed-size dual vectors.
+pub trait StaticDiffInput: DiffInput {
+    type Dim: DimName;
+
+    fn dual(&self) -> Self::Packed<DualVector<Self::Dim>>
+    where
+        AllocatorBuffer<Self::Dim>: Sync + Send,
+        DefaultAllocator: DualAllocator<Self::Dim>,
+        DualVector<Self::Dim>: Copy;
+}
+
+fn perturb_component<V>(v: &V, col: &mut usize, done: &mut bool, eps: dtype) -> V
+where
+    V: VariableDtype,
+{
+    if *done {
+        return v.clone();
+    }
+
+    let dim = Variable::dim(v);
+    if *col < dim {
+        let mut delta = VectorX::zeros(dim);
+        delta[*col] = eps;
+        *done = true;
+        v.oplus(delta.as_view())
+    } else {
+        *col -= dim;
+        v.clone()
+    }
+}
+
+fn dual_component<V, N>(v: &V, offset: &mut usize) -> V::Alias<DualVector<N>>
+where
+    V: VariableDtype,
+    N: DimName,
+    AllocatorBuffer<N>: Sync + Send,
+    DefaultAllocator: DualAllocator<N>,
+    DualVector<N>: Copy,
+{
+    let out = v.dual::<N>(*offset);
+    *offset += Variable::dim(v);
+    out
+}
+
+impl<V> DiffInput for V
+where
+    V: VariableDtype,
+{
+    type Packed<T: Numeric> = V::Alias<T>;
+
+    fn dim(&self) -> usize {
+        Variable::dim(self)
+    }
+
+    fn pack(&self) -> Self::Packed<dtype> {
+        self.clone()
+    }
+
+    fn perturb(&self, col: usize, eps: dtype) -> Self {
+        let mut delta = VectorX::zeros(Variable::dim(self));
+        delta[col] = eps;
+        self.oplus(delta.as_view())
+    }
+}
+
+impl<V> StaticDiffInput for V
+where
+    V: VariableDtype,
+    AllocatorBuffer<V::Dim>: Sync + Send,
+    DefaultAllocator: DualAllocator<V::Dim>,
+    DualVector<V::Dim>: Copy,
+{
+    type Dim = V::Dim;
+
+    fn dual(&self) -> Self::Packed<DualVector<Self::Dim>> {
+        self.dual::<Self::Dim>(0)
+    }
+}
+
+macro_rules! impl_tuple_diff_input {
+    ($($var:ident: $name:ident),+ $(,)?) => {
+        impl<$($var),+> DiffInput for ($($var,)+)
+        where
+            $($var: VariableDtype,)+
+        {
+            type Packed<T: Numeric> = ($($var::Alias<T>,)+);
+
+            fn dim(&self) -> usize {
+                #[allow(non_snake_case)]
+                let ($($name,)+) = self;
+                0 $(+ Variable::dim($name))+
+            }
+
+            fn pack(&self) -> Self::Packed<dtype> {
+                #[allow(non_snake_case)]
+                let ($($name,)+) = self;
+                ($($name.clone(),)+)
+            }
+
+            fn perturb(&self, col: usize, eps: dtype) -> Self {
+                #[allow(non_snake_case)]
+                let ($($name,)+) = self;
+                let mut col = col;
+                let mut done = false;
+                let out = ($(
+                    perturb_component($name, &mut col, &mut done, eps),
+                )+);
+                assert!(done, "perturbation column out of bounds");
+                out
+            }
         }
     };
 }
 
+impl_tuple_diff_input!(V1: v1, V2: v2);
+impl_tuple_diff_input!(V1: v1, V2: v2, V3: v3);
+impl_tuple_diff_input!(V1: v1, V2: v2, V3: v3, V4: v4);
+impl_tuple_diff_input!(V1: v1, V2: v2, V3: v3, V4: v4, V5: v5);
+impl_tuple_diff_input!(V1: v1, V2: v2, V3: v3, V4: v4, V5: v5, V6: v6);
+
+macro_rules! impl_tuple_static_diff_input {
+    (($($var:ident: $name:ident),+), $dim:ty, [$($bound:tt)*]) => {
+        impl<$($var),+> StaticDiffInput for ($($var,)+)
+        where
+            $($var: VariableDtype,)+
+            $($bound)*
+            AllocatorBuffer<$dim>: Sync + Send,
+            DefaultAllocator: DualAllocator<$dim>,
+            DualVector<$dim>: Copy,
+        {
+            type Dim = $dim;
+
+            fn dual(&self) -> Self::Packed<DualVector<Self::Dim>> {
+                #[allow(non_snake_case)]
+                let ($($name,)+) = self;
+                let mut offset = 0;
+                ($(
+                    dual_component::<$var, Self::Dim>($name, &mut offset),
+                )+)
+            }
+        }
+    };
+}
+
+impl_tuple_static_diff_input!(
+    (V1: v1, V2: v2),
+    DimNameSum<V1::Dim, V2::Dim>,
+    [V1::Dim: DimNameAdd<V2::Dim>,]
+);
+impl_tuple_static_diff_input!(
+    (V1: v1, V2: v2, V3: v3),
+    DimNameSum<DimNameSum<V1::Dim, V2::Dim>, V3::Dim>,
+    [V1::Dim: DimNameAdd<V2::Dim>, DimNameSum<V1::Dim, V2::Dim>: DimNameAdd<V3::Dim>,]
+);
+impl_tuple_static_diff_input!(
+    (V1: v1, V2: v2, V3: v3, V4: v4),
+    DimNameSum<DimNameSum<DimNameSum<V1::Dim, V2::Dim>, V3::Dim>, V4::Dim>,
+    [V1::Dim: DimNameAdd<V2::Dim>, DimNameSum<V1::Dim, V2::Dim>: DimNameAdd<V3::Dim>, DimNameSum<DimNameSum<V1::Dim, V2::Dim>, V3::Dim>: DimNameAdd<V4::Dim>,]
+);
+impl_tuple_static_diff_input!(
+    (V1: v1, V2: v2, V3: v3, V4: v4, V5: v5),
+    DimNameSum<DimNameSum<DimNameSum<DimNameSum<V1::Dim, V2::Dim>, V3::Dim>, V4::Dim>, V5::Dim>,
+    [V1::Dim: DimNameAdd<V2::Dim>, DimNameSum<V1::Dim, V2::Dim>: DimNameAdd<V3::Dim>, DimNameSum<DimNameSum<V1::Dim, V2::Dim>, V3::Dim>: DimNameAdd<V4::Dim>, DimNameSum<DimNameSum<DimNameSum<V1::Dim, V2::Dim>, V3::Dim>, V4::Dim>: DimNameAdd<V5::Dim>,]
+);
+impl_tuple_static_diff_input!(
+    (V1: v1, V2: v2, V3: v3, V4: v4, V5: v5, V6: v6),
+    DimNameSum<DimNameSum<DimNameSum<DimNameSum<DimNameSum<V1::Dim, V2::Dim>, V3::Dim>, V4::Dim>, V5::Dim>, V6::Dim>,
+    [V1::Dim: DimNameAdd<V2::Dim>, DimNameSum<V1::Dim, V2::Dim>: DimNameAdd<V3::Dim>, DimNameSum<DimNameSum<V1::Dim, V2::Dim>, V3::Dim>: DimNameAdd<V4::Dim>, DimNameSum<DimNameSum<DimNameSum<V1::Dim, V2::Dim>, V3::Dim>, V4::Dim>: DimNameAdd<V5::Dim>, DimNameSum<DimNameSum<DimNameSum<DimNameSum<V1::Dim, V2::Dim>, V3::Dim>, V4::Dim>, V5::Dim>: DimNameAdd<V6::Dim>,]
+);
+
 /// A trait to abstract over different differentiation methods
 ///
-/// Specifically, this trait works for multi-input functions (where each input
-/// is a variable) with scalar output (gradient) or vector output (Jacobian).
+/// Specifically, this trait works for single-variable or tuple-pack functions
+/// with scalar output (gradient) or vector output (Jacobian).
 ///
 /// This trait is implemented for both numerical and forward-mode in
 /// [NumericalDiff] and [ForwardProp], respectively. Where possible, we
 /// recommend [ForwardProp] which functions using dual numbers.
-pub trait Diff {
+pub trait Diff<I: DiffInput> {
     /// The dtype of the variables
     type T: Numeric;
 
-    fn_maker!(grad, 1, (v1: V1));
-    fn_maker!(grad, 2, (v1: V1), (v2: V2));
-    fn_maker!(grad, 3, (v1: V1), (v2: V2), (v3: V3));
-    fn_maker!(grad, 4, (v1: V1), (v2: V2), (v3: V3), (v4: V4));
-    fn_maker!(grad, 5, (v1: V1), (v2: V2), (v3: V3), (v4: V4), (v5: V5));
-    fn_maker!(grad, 6, (v1: V1), (v2: V2), (v3: V3), (v4: V4), (v5: V5), (v6: V6));
+    fn jacobian<F>(f: F, input: &I) -> DiffResult<VectorX, MatrixX>
+    where
+        F: Fn(I::Packed<Self::T>) -> VectorX<Self::T>;
 
-    fn_maker!(jac, 1, (v1: V1));
-    fn_maker!(jac, 2, (v1: V1), (v2: V2));
-    fn_maker!(jac, 3, (v1: V1), (v2: V2), (v3: V3));
-    fn_maker!(jac, 4, (v1: V1), (v2: V2), (v3: V3), (v4: V4));
-    fn_maker!(jac, 5, (v1: V1), (v2: V2), (v3: V3), (v4: V4), (v5: V5));
-    fn_maker!(jac, 6, (v1: V1), (v2: V2), (v3: V3), (v4: V4), (v5: V5), (v6: V6));
+    fn gradient<F>(f: F, input: &I) -> DiffResult<dtype, VectorX>
+    where
+        F: Fn(I::Packed<Self::T>) -> Self::T,
+    {
+        let f_wrapped = |input| VectorX::from_element(1, f(input));
+        let DiffResult { value, diff } = Self::jacobian(f_wrapped, input);
+        let diff = VectorX::from_iterator(diff.len(), diff.iter().cloned());
+        DiffResult {
+            value: value[0],
+            diff,
+        }
+    }
 }
 
 /// Compute the derivative of a scalar function using numerical derivatives.

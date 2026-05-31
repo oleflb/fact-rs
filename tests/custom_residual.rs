@@ -4,7 +4,6 @@ use factrs::{
     dtype,
     linalg::{ForwardProp, Numeric, VectorX, vectorx},
     residuals::Residual,
-    traits::Variable,
     variables::SE2,
 };
 
@@ -22,7 +21,7 @@ impl XPrior {
 
 #[factrs::mark]
 impl Residual for XPrior {
-    type Differ = ForwardProp<<SE2 as Variable>::Dim>;
+    type Differ = ForwardProp;
     type Input = SE2;
 
     fn residual<T: Numeric>(&self, v: SE2<T>) -> VectorX<T> {

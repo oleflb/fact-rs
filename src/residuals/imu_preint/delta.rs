@@ -308,7 +308,7 @@ mod test {
 
         // Make expected A
         let vv: VectorVar<15> = VectorVar::from(v);
-        let a_exp = ForwardProp::<Const<15>>::jacobian_1(f, &vv).diff;
+        let a_exp = ForwardProp::jacobian(f, &vv).diff;
 
         // Make got A
         let delta = delta_from_vec(v);
@@ -359,7 +359,7 @@ mod test {
             preint.fixed_rows_mut::<3>(6).copy_from(&delta.xi_pos);
             preint
         };
-        let H_exp = ForwardProp::<Const<6>>::jacobian_1(integrate_diff, &bias).diff;
+        let H_exp = ForwardProp::jacobian(integrate_diff, &bias).diff;
         let H_gyro_exp = H_exp.fixed_view::<9, 3>(0, 0);
         let H_accel_exp = H_exp.fixed_view::<9, 3>(0, 3);
 

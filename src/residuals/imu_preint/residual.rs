@@ -292,7 +292,7 @@ pub struct ImuPreintegrationResidual {
 #[factrs::mark]
 impl Residual for ImuPreintegrationResidual {
     type Input = (SE3, VectorVar3, ImuBias, SE3, VectorVar3, ImuBias);
-    type Differ = ForwardProp<Const<30>>;
+    type Differ = ForwardProp;
 
     fn residual<T: crate::linalg::Numeric>(
         &self,

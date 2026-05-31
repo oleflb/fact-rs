@@ -409,8 +409,8 @@ mod tests {
     #[test]
     fn gaussian_noise_dyn_from_cov_whitens_vector() {
         let cov = MatrixX::from_row_slice(2, 2, &[4.0, 0.0, 0.0, 9.0]);
-        let noise = GaussianNoiseDyn::from_matrix_cov(cov.as_view())
-            .expect("positive definite covariance");
+        let noise =
+            GaussianNoiseDyn::from_matrix_cov(cov.as_view()).expect("positive definite covariance");
         let got = noise.whiten_vec(vectorx![2.0, 3.0]);
         assert_eq!(got, vectorx![1.0, 1.0]);
     }
@@ -425,8 +425,8 @@ mod tests {
     #[should_panic(expected = "GaussianNoiseDyn vector dimension mismatch")]
     fn gaussian_noise_dyn_rejects_dimension_mismatch() {
         let cov = MatrixX::identity(2, 2);
-        let noise = GaussianNoiseDyn::from_matrix_cov(cov.as_view())
-            .expect("positive definite covariance");
+        let noise =
+            GaussianNoiseDyn::from_matrix_cov(cov.as_view()).expect("positive definite covariance");
         let _ = noise.whiten_vec(vectorx![1.0, 2.0, 3.0]);
     }
 

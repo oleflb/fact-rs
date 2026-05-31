@@ -39,7 +39,7 @@ where
     P::Dim: DimNameAdd<P::Dim>,
 {
     type Input = (P, P);
-    type Differ = ForwardProp<DimNameSum<P::Dim, P::Dim>>;
+    type Differ = ForwardProp;
 
     fn residual<T: Numeric>(&self, (v1, v2): (P::Alias<T>, P::Alias<T>)) -> VectorX<T> {
         let delta = self.delta.cast::<T>();

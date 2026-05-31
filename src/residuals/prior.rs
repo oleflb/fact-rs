@@ -34,7 +34,7 @@ where
     DualVector<P::Dim>: Copy,
 {
     type Input = P;
-    type Differ = ForwardProp<P::Dim>;
+    type Differ = ForwardProp;
 
     fn residual<T: Numeric>(&self, v: <P as Variable>::Alias<T>) -> VectorX<T> {
         self.prior.cast::<T>().ominus(&v)
@@ -100,7 +100,7 @@ mod test {
             crate::residuals::ErasedResidual::residual(&prior_residual, &vals, &[X(0).into()])
                 .expect("prior residual should evaluate")
         };
-        let jac_n = NumericalDiff::<PWR>::jacobian_1(f, &x1).diff;
+        let jac_n = NumericalDiff::<PWR>::jacobian(f, &x1).diff;
 
         eprintln!("jac: {jac:.3}");
         eprintln!("jac_n: {jac_n:.3}");

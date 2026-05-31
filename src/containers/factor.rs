@@ -374,7 +374,7 @@ mod tests {
         let grad_got = -linear.a.mat().transpose() * linear.b;
         println!("Received {grad_got:}");
 
-        let grad_num = NumericalDiff::<PWR>::gradient_1(f, &x).diff;
+        let grad_num = NumericalDiff::<PWR>::gradient(f, &x).diff;
         println!("Expected {grad_num:}");
 
         assert_matrix_eq!(grad_got, grad_num, comp = abs, tol = TOL);

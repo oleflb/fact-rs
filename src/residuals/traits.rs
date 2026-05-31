@@ -1,20 +1,19 @@
-use std::{any::type_name, fmt::Debug};
+use std::fmt::Debug;
 
 use crate::{
     containers::{Key, Values},
     dtype,
-    linalg::{Diff, DiffResult, MatrixX, Numeric, VectorX},
+    linalg::{Diff, DiffInput, DiffResult, MatrixX, Numeric, VectorX},
     residuals::{DynVarPack, ResidualError, VarPack},
-    variables::VariableDtype,
 };
 use dyn_clone::DynClone;
 
 /// Typed residual authoring trait.
 pub trait Residual: Debug + Clone + Send + 'static {
-    type Input: VarPack;
-    type Differ: DiffPack<Self::Input>;
+    type Input: VarPack + DiffInput;
+    type Differ: Diff<Self::Input>;
 
-    fn residual<T: Numeric>(&self, input: <Self::Input as VarPack>::Packed<T>) -> VectorX<T>;
+    fn residual<T: Numeric>(&self, input: <Self::Input as DiffInput>::Packed<T>) -> VectorX<T>;
 }
 
 /// Optional marker for residuals with a compile-time output dimension.
@@ -55,114 +54,6 @@ pub trait DynResidual: Debug + Clone + Send + 'static {
         numerical_jacobian_dyn(self, values, input)
     }
 }
-
-/// Differentiates a typed residual over a variable pack.
-pub trait DiffPack<P: VarPack>: Diff {
-    fn jacobian<R>(
-        residual: &R,
-        values: &Values,
-        keys: &[Key],
-    ) -> Result<DiffResult<VectorX, MatrixX>, ResidualError>
-    where
-        R: Residual<Input = P>;
-}
-
-fn check_key_count(keys: &[Key], expected: usize) -> Result<(), ResidualError> {
-    if keys.len() == expected {
-        Ok(())
-    } else {
-        Err(ResidualError::WrongKeyCount {
-            expected,
-            actual: keys.len(),
-        })
-    }
-}
-
-fn get_var<V: VariableDtype + 'static>(values: &Values, key: Key) -> Result<&V, ResidualError> {
-    values
-        .get_unchecked(key)
-        .ok_or(ResidualError::WrongVariableType {
-            key,
-            expected: type_name::<V>(),
-        })
-}
-
-impl<D, V> DiffPack<V> for D
-where
-    D: Diff,
-    V: VariableDtype + 'static,
-{
-    fn jacobian<R>(
-        residual: &R,
-        values: &Values,
-        keys: &[Key],
-    ) -> Result<DiffResult<VectorX, MatrixX>, ResidualError>
-    where
-        R: Residual<Input = V>,
-    {
-        check_key_count(keys, 1)?;
-        let v1 = get_var::<V>(values, keys[0])?;
-        Ok(D::jacobian_1(|v1| residual.residual(v1), v1))
-    }
-}
-
-macro_rules! impl_tuple_diff_pack {
-    ($count:expr, $method:ident, $(($idx:tt, $name:ident, $var:ident)),+ $(,)?) => {
-        impl<D, $($var),+> DiffPack<($($var,)+)> for D
-        where
-            D: Diff,
-            $($var: VariableDtype + 'static,)+
-        {
-            fn jacobian<R>(
-                residual: &R,
-                values: &Values,
-                keys: &[Key],
-            ) -> Result<DiffResult<VectorX, MatrixX>, ResidualError>
-            where
-                R: Residual<Input = ($($var,)+)>,
-            {
-                check_key_count(keys, $count)?;
-                $(
-                    let $name = get_var::<$var>(values, keys[$idx])?;
-                )+
-                Ok(D::$method(
-                    |$($name),+| residual.residual(($($name,)+)),
-                    $($name,)+
-                ))
-            }
-        }
-    };
-}
-
-impl_tuple_diff_pack!(2, jacobian_2, (0, v1, V1), (1, v2, V2));
-impl_tuple_diff_pack!(3, jacobian_3, (0, v1, V1), (1, v2, V2), (2, v3, V3));
-impl_tuple_diff_pack!(
-    4,
-    jacobian_4,
-    (0, v1, V1),
-    (1, v2, V2),
-    (2, v3, V3),
-    (3, v4, V4)
-);
-impl_tuple_diff_pack!(
-    5,
-    jacobian_5,
-    (0, v1, V1),
-    (1, v2, V2),
-    (2, v3, V3),
-    (3, v4, V4),
-    (4, v5, V5)
-);
-impl_tuple_diff_pack!(
-    6,
-    jacobian_6,
-    (0, v1, V1),
-    (1, v2, V2),
-    (2, v3, V3),
-    (3, v4, V4),
-    (4, v5, V5),
-    (5, v6, V6)
-);
 
 fn numerical_jacobian_dyn<R: DynResidual>(
     residual: &R,
@@ -235,15 +126,12 @@ mod tests {
         fn residual(&self, values: &Values, input: &DynVarPack) -> VectorX {
             VectorX::from_iterator(
                 input.keys().len(),
-                input
-                    .keys()
-                    .iter()
-                    .map(|key| {
-                        values
-                            .get_raw(*key)
-                            .expect("dynamic residual key must exist")
-                            .dim() as dtype
-                    }),
+                input.keys().iter().map(|key| {
+                    values
+                        .get_raw(*key)
+                        .expect("dynamic residual key must exist")
+                        .dim() as dtype
+                }),
             )
         }
     }

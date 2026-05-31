@@ -72,6 +72,10 @@ pub trait VarPack: Send + 'static {
 
     fn dim_in(values: &Values, keys: &[Key]) -> Result<usize, ResidualError>;
 
+    fn input(values: &Values, keys: &[Key]) -> Result<Self, ResidualError>
+    where
+        Self: Sized;
+
     fn pack<T: Numeric>(values: &Values, keys: &[Key]) -> Result<Self::Packed<T>, ResidualError>;
 }
 
@@ -86,10 +90,7 @@ fn check_key_count(keys: &[Key], expected: usize) -> Result<(), ResidualError> {
     }
 }
 
-fn get_typed<V: VariableDtype + 'static>(
-    values: &Values,
-    key: Key,
-) -> Result<&V, ResidualError> {
+fn get_typed<V: VariableDtype + 'static>(values: &Values, key: Key) -> Result<&V, ResidualError> {
     values
         .get_unchecked(key)
         .ok_or(ResidualError::WrongVariableType {
@@ -107,6 +108,11 @@ where
     fn dim_in(values: &Values, keys: &[Key]) -> Result<usize, ResidualError> {
         check_key_count(keys, 1)?;
         Ok(Variable::dim(get_typed::<V>(values, keys[0])?))
+    }
+
+    fn input(values: &Values, keys: &[Key]) -> Result<Self, ResidualError> {
+        check_key_count(keys, 1)?;
+        Ok(get_typed::<V>(values, keys[0])?.clone())
     }
 
     fn pack<T: Numeric>(values: &Values, keys: &[Key]) -> Result<Self::Packed<T>, ResidualError> {
@@ -130,6 +136,13 @@ macro_rules! impl_tuple_var_pack {
                     dim += Variable::dim(get_typed::<$var>(values, keys[$idx])?);
                 )+
                 Ok(dim)
+            }
+
+            fn input(values: &Values, keys: &[Key]) -> Result<Self, ResidualError> {
+                check_key_count(keys, $count)?;
+                Ok(($(
+                    get_typed::<$var>(values, keys[$idx])?.clone(),
+                )+))
             }
 
             fn pack<T: Numeric>(
@@ -197,6 +210,10 @@ impl VarPack for DynVarPack {
                 .map(|value| dim + value.dim())
                 .ok_or(ResidualError::MissingKey(*key))
         })
+    }
+
+    fn input(_values: &Values, keys: &[Key]) -> Result<Self, ResidualError> {
+        Ok(Self::from_keys_unchecked(keys.to_vec()))
     }
 
     fn pack<T: Numeric>(_values: &Values, keys: &[Key]) -> Result<Self::Packed<T>, ResidualError> {

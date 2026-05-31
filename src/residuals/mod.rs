@@ -23,7 +23,7 @@
 //!
 //! use factrs::{
 //!     dtype,
-//!     linalg::{Const, ForwardProp, Numeric, VectorX},
+//!     linalg::{ForwardProp, Numeric, VectorX},
 //!     residuals,
 //!     variables::SE3,
 //! };
@@ -37,7 +37,7 @@
 //! #[factrs::mark]
 //! impl residuals::Residual for ZResidual {
 //!     type Input = SE3;
-//!     type Differ = ForwardProp<Const<6>>;
+//!     type Differ = ForwardProp;
 //!
 //!     fn residual<T: Numeric>(&self, x1: SE3<T>) -> VectorX<T> {
 //!         VectorX::from_element(1, T::from(self.value) - x1.xyz().z)
@@ -48,7 +48,7 @@ mod traits;
 mod var_pack;
 #[cfg(feature = "serde")]
 pub use traits::tag_residual;
-pub use traits::{DiffPack, DynResidual, ErasedResidual, FixedOutputDim, Residual};
+pub use traits::{DynResidual, ErasedResidual, FixedOutputDim, Residual};
 pub use var_pack::{DynVarPack, FactorInput, KeyPack, ResidualError, VarPack};
 
 mod prior;

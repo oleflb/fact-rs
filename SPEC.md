@@ -38,7 +38,7 @@ Breaking API changes are acceptable.
 
 Use two residual layers:
 
-- `Residual`: typed authoring trait with `type Input: VarPack`
+- `Residual`: typed authoring trait with `type Input: VarPack + DiffInput`
 - `ErasedResidual`: object-safe trait stored by `Factor` and `Graph`
 
 Use `VarPack` for residual input shape. Use a separate factor-input/key-pack conversion to produce the ordered keys stored by a factor.
@@ -49,10 +49,10 @@ Typed residuals use tuple packs:
 type Input = (SE3, VectorVar3, ImuBias);
 ```
 
-Dynamic residuals use a concrete key-owned pack:
+Dynamic residuals use `DynResidual` with a concrete key-owned pack:
 
 ```rust
-type Input = DynVarPack;
+fn residual(&self, values: &Values, input: &DynVarPack) -> VectorX;
 ```
 
 `DynVarPack` is not a trait and is not generic over variable types. It is a concrete runtime input specification:
@@ -84,6 +84,10 @@ pub trait VarPack: Send + 'static {
     type Packed<T: Numeric>;
 
     fn dim_in(values: &Values, keys: &[Key]) -> Result<usize, ResidualError>;
+
+    fn input(values: &Values, keys: &[Key]) -> Result<Self, ResidualError>
+    where
+        Self: Sized;
 
     fn pack<T: Numeric>(values: &Values, keys: &[Key]) -> Result<Self::Packed<T>, ResidualError>;
 }
@@ -164,7 +168,7 @@ Dimension is queried through `Values` when needed:
 values.get_raw(key).map(VariableSafe::dim)
 ```
 
-`DynVarPack` also implements `VarPack` so it can be used as `type Input = DynVarPack`. Its packed value can be itself or a lightweight view over the same keys. Dynamic residual authoring does not rely on generic typed packing; it receives `Values` and `&DynVarPack` directly.
+`DynVarPack` also implements `VarPack` so builders can reuse the same input/key-pack machinery for dynamic factors. Dynamic residual authoring does not rely on generic typed packing; it receives `Values` and `&DynVarPack` directly.
 
 ### Typed `Residual`
 
@@ -174,10 +178,10 @@ Sketch:
 
 ```rust
 pub trait Residual: Debug + Clone + Send + 'static {
-    type Input: VarPack;
-    type Differ: DiffPack<Self::Input>;
+    type Input: VarPack + DiffInput;
+    type Differ: Diff<Self::Input>;
 
-    fn residual<T: Numeric>(&self, input: <Self::Input as VarPack>::Packed<T>) -> VectorX<T>;
+    fn residual<T: Numeric>(&self, input: <Self::Input as DiffInput>::Packed<T>) -> VectorX<T>;
 }
 ```
 
@@ -358,7 +362,7 @@ Update `fac!`:
 
 - Add pack-based differentiation for typed tuple packs.
 - Add dynamic numerical differentiation for `DynResidual` default Jacobians.
-- Keep existing `ForwardProp` helpers as internal utilities or refactor them behind `DiffPack`.
+- Refactor `ForwardProp` and `NumericalDiff` behind the pack-based `Diff<I>` API.
 
 ### Phase 4: Factor And Graph
 
@@ -462,9 +466,9 @@ These should be settled while coding, based on Rust ergonomics:
 ## Acceptance Criteria
 
 - no public `Residual1` through `Residual6` authoring path remains
-- all built-in residuals use `type Input: VarPack`
+- all built-in residuals use `type Input: VarPack + DiffInput`
 - `DynVarPack` is a concrete public type with owned `Vec<Key>`
-- dynamic residuals receive `Values` and `DynVarPack`
+- dynamic residuals receive `Values` and `&DynVarPack`
 - output dimension is value-dependent or inferred from residual output
 - runtime-sized Gaussian noise exists and is tested
 - factor construction has one primary API path

@@ -397,7 +397,7 @@ mod tests {
         let xi = Vector3::new(0.1, 0.2, 0.3);
         let got = SO3::dexp(xi.as_view());
 
-        let exp = NumericalDiff::<PWR>::jacobian_variable_1(
+        let exp = NumericalDiff::<PWR>::jacobian_variable(
             |x: VectorVar3| SO3::exp(Vector3::from(x).as_view()),
             &VectorVar3::from(xi),
         )
