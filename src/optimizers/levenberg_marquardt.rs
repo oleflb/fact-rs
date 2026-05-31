@@ -5,7 +5,7 @@ use faer_ext::IntoNalgebra;
 
 use super::{BaseOptParams, OptError, OptObserverVec, OptParams, OptResult, Optimizer};
 use crate::{
-    containers::{Graph, GraphOrder, Values, ValuesOrder},
+    containers::{Graph, GraphOrder, Values},
     dtype,
     linalg::DiffResult,
     linear::{LinearSolver, LinearValues},
@@ -108,20 +108,28 @@ impl Optimizer for LevenMarquardt {
     }
 
     fn init(&mut self, values: &Values) -> Vec<&'static str> {
-        // TODO: Some way to manual specify how to computer ValuesOrder
-        // Precompute the sparsity pattern
-        self.graph_order = Some(
-            self.graph
-                .sparsity_pattern(values, ValuesOrder::from_values(values)),
-        );
+        let structure = self.graph.structure(values);
+        let rebuild = self
+            .graph_order
+            .as_ref()
+            .is_none_or(|order| order.structure_hash != structure.hash);
+
+        if rebuild {
+            self.graph_order = Some(self.graph.sparsity_pattern_from_structure(structure));
+            self.solver.reset_symbolic();
+        }
 
         vec!["   Lambda   ", "  Fidelity  "]
     }
 
     // TODO: More sophisticated stopping criteria based on magnitude of the gradient
     fn step(&mut self, mut values: Values, _idx: usize) -> OptResult<(Values, String)> {
-        // Make an ordering
-        let order = ValuesOrder::from_values(&values);
+        let order = self
+            .graph_order
+            .as_ref()
+            .expect("Missing graph order")
+            .order
+            .clone();
 
         // Form the linear system
         let linear_graph = self.graph.linearize(&values);

@@ -4,9 +4,10 @@ use std::{
 };
 
 use faer::sparse::{Pair, SymbolicSparseColMat};
+use foldhash::HashMap;
 use pad_adapter::PadAdapter;
 
-use super::{DefaultSymbolHandler, Idx, KeyFormatter, Values, ValuesOrder};
+use super::{DefaultSymbolHandler, Idx, Key, KeyFormatter, Values, ValuesOrder};
 // Once "debug_closure_helpers" is stabilized, we won't need this anymore
 // Need custom debug to handle pretty key printing at the moment
 // Pad adapter helps with the pretty printing
@@ -79,35 +80,121 @@ impl Graph {
         LinearGraph::from_vec(factors)
     }
 
-    pub fn sparsity_pattern(&self, values: &Values, order: ValuesOrder) -> GraphOrder {
-        let total_rows = self.factors.iter().map(|f| f.dim_out(values)).sum();
-        let total_columns = order.dim();
+    pub fn structure_hash(&self, values: &Values) -> GraphStructureHash {
+        self.structure(values).hash
+    }
 
+    pub fn sparsity_pattern(&self, values: &Values) -> GraphOrder {
+        let structure = self.structure(values);
+        self.sparsity_pattern_from_structure(structure)
+    }
+
+    pub(crate) fn structure(&self, values: &Values) -> GraphStructure {
+        let mut order_map = HashMap::default();
+        let mut order_entries = Vec::new();
+        let mut col = 0;
+        let mut total_rows = 0;
+        let mut factor_rows = Vec::with_capacity(self.factors.len());
+
+        for factor in &self.factors {
+            let dim_out = factor.dim_out(values);
+            factor_rows.push(dim_out);
+            total_rows += dim_out;
+
+            for key in factor.keys() {
+                if order_map.contains_key(key) {
+                    continue;
+                }
+
+                let dim = values
+                    .get_raw(*key)
+                    .unwrap_or_else(|| panic!("key {key:?} missing in values"))
+                    .dim();
+                order_map.insert(*key, Idx { idx: col, dim });
+                order_entries.push((*key, dim));
+                col += dim;
+            }
+        }
+
+        let order = ValuesOrder::new(order_map);
+        let hash = self.hash_structure(&order_entries, &factor_rows, total_rows, col);
+
+        GraphStructure {
+            hash,
+            order,
+            factor_rows,
+            total_rows,
+            total_cols: col,
+        }
+    }
+
+    pub(crate) fn sparsity_pattern_from_structure(&self, structure: GraphStructure) -> GraphOrder {
+        let GraphStructure {
+            hash,
+            order,
+            factor_rows,
+            total_rows,
+            total_cols,
+        } = structure;
         let mut indices = Vec::<Pair<usize, usize>>::new();
 
-        let _ = self.factors.iter().fold(0, |row, f| {
-            f.keys().iter().for_each(|key| {
-                (0..f.dim_out(values)).for_each(|i| {
-                    let Idx {
-                        idx: col,
-                        dim: col_dim,
-                    } = order.get(*key).expect("Key missing in values");
-                    (0..*col_dim).for_each(|j| {
-                        indices.push(Pair::new(row + i, col + j));
+        let _ = self
+            .factors
+            .iter()
+            .zip(&factor_rows)
+            .fold(0, |row, (f, dim_out)| {
+                f.keys().iter().for_each(|key| {
+                    (0..*dim_out).for_each(|i| {
+                        let Idx {
+                            idx: col,
+                            dim: col_dim,
+                        } = order.get(*key).expect("Key missing in values");
+                        (0..*col_dim).for_each(|j| {
+                            indices.push(Pair::new(row + i, col + j));
+                        });
                     });
                 });
+                row + *dim_out
             });
-            row + f.dim_out(values)
-        });
 
         let (sparsity_pattern, sparsity_order) =
-            SymbolicSparseColMat::try_new_from_indices(total_rows, total_columns, &indices)
+            SymbolicSparseColMat::try_new_from_indices(total_rows, total_cols, &indices)
                 .expect("Failed to make sparse matrix");
         GraphOrder {
+            structure_hash: hash,
             order,
             sparsity_pattern,
             sparsity_order,
         }
+    }
+
+    fn hash_structure(
+        &self,
+        order_entries: &[(Key, usize)],
+        factor_rows: &[usize],
+        total_rows: usize,
+        total_cols: usize,
+    ) -> GraphStructureHash {
+        let mut hasher = StructureHasher::new();
+        hasher.write_usize(self.factors.len());
+        hasher.write_usize(total_rows);
+        hasher.write_usize(total_cols);
+        hasher.write_usize(order_entries.len());
+
+        for (key, dim) in order_entries {
+            hasher.write_u64(key.0);
+            hasher.write_usize(*dim);
+        }
+
+        for (factor, dim_out) in self.factors.iter().zip(factor_rows) {
+            hasher.write_usize(*dim_out);
+            hasher.write_usize(factor.keys().len());
+            for key in factor.keys() {
+                hasher.write_u64(key.0);
+            }
+        }
+
+        hasher.finish()
     }
 
     pub fn iter(&self) -> std::slice::Iter<'_, Factor> {
@@ -186,10 +273,137 @@ impl<KF: KeyFormatter> Debug for GraphFormatter<'_, KF> {
 /// of the graph and the sparsity pattern of the Jacobian (allows use to avoid
 /// resorting indices).
 pub struct GraphOrder {
+    pub structure_hash: GraphStructureHash,
     // Contains the order of the variables
     pub order: ValuesOrder,
     // Contains the sparsity pattern of the jacobian
     pub sparsity_pattern: SymbolicSparseColMat<usize>,
     // Contains the order of values to put into the sparsity pattern
     pub sparsity_order: faer::sparse::Argsort<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GraphStructureHash(pub u64);
+
+impl GraphStructureHash {
+    pub const EMPTY: Self = Self(0);
+}
+
+pub(crate) struct GraphStructure {
+    pub hash: GraphStructureHash,
+    pub order: ValuesOrder,
+    pub factor_rows: Vec<usize>,
+    pub total_rows: usize,
+    pub total_cols: usize,
+}
+
+struct StructureHasher {
+    state: u64,
+}
+
+impl StructureHasher {
+    const SEED: u64 = 0x517c_c1b7_2722_0a95;
+    const PRIME: u64 = 0x9e37_79b9_7f4a_7c15;
+
+    fn new() -> Self {
+        Self { state: Self::SEED }
+    }
+
+    fn write_usize(&mut self, value: usize) {
+        self.write_u64(value as u64);
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.state ^= value
+            .wrapping_add(Self::PRIME)
+            .wrapping_add(self.state << 6)
+            .wrapping_add(self.state >> 2);
+        self.state = Self::mix(self.state);
+    }
+
+    fn finish(self) -> GraphStructureHash {
+        GraphStructureHash(Self::mix(self.state))
+    }
+
+    fn mix(mut value: u64) -> u64 {
+        value ^= value >> 30;
+        value = value.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        value ^= value >> 27;
+        value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
+        value ^ (value >> 31)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        assign_symbols,
+        containers::{FactorBuilder, Values},
+        residuals::PriorResidual,
+        variables::{Variable, VectorVar2, VectorVar3},
+    };
+
+    assign_symbols!(X: VectorVar2; Y: VectorVar3);
+
+    fn values_x0() -> Values {
+        let mut values = Values::new();
+        values.insert(X(0), VectorVar2::identity());
+        values
+    }
+
+    fn prior_x(idx: u32) -> Factor {
+        FactorBuilder::new(PriorResidual::new(VectorVar2::new(1.0, 2.0)), X(idx)).build()
+    }
+
+    #[test]
+    fn graph_order_is_graph_induced() {
+        let mut values = values_x0();
+        values.insert(Y(0), VectorVar3::identity());
+
+        let mut graph = Graph::new();
+        graph.add_factor(prior_x(0));
+
+        let graph_order = graph.sparsity_pattern(&values);
+
+        assert_eq!(graph_order.order.len(), 1);
+        assert_eq!(graph_order.order.dim(), 2);
+        assert!(graph_order.order.get(X(0)).is_some());
+        assert!(graph_order.order.get(Y(0)).is_none());
+        assert_eq!(graph_order.structure_hash, graph.structure_hash(&values));
+    }
+
+    #[test]
+    fn structure_hash_ignores_unused_values_and_numeric_changes() {
+        let mut graph = Graph::new();
+        graph.add_factor(prior_x(0));
+
+        let values = values_x0();
+        let hash = graph.structure_hash(&values);
+
+        let mut with_unused = values.clone();
+        with_unused.insert(Y(0), VectorVar3::new(1.0, 2.0, 3.0));
+        assert_eq!(hash, graph.structure_hash(&with_unused));
+
+        let mut with_new_x0 = values.clone();
+        with_new_x0.insert(X(0), VectorVar2::new(10.0, 20.0));
+        assert_eq!(hash, graph.structure_hash(&with_new_x0));
+    }
+
+    #[test]
+    fn structure_hash_changes_with_factor_structure() {
+        let mut values = values_x0();
+        values.insert(X(1), VectorVar2::identity());
+
+        let mut graph = Graph::new();
+        graph.add_factor(prior_x(0));
+        let hash = graph.structure_hash(&values);
+
+        graph.add_factor(prior_x(1));
+        assert_ne!(hash, graph.structure_hash(&values));
+
+        let mut other_graph = Graph::new();
+        other_graph.add_factor(prior_x(1));
+        assert_ne!(hash, other_graph.structure_hash(&values));
+    }
 }

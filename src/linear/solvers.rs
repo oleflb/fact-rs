@@ -22,6 +22,9 @@ pub trait LinearSolver: Send {
     /// Used by QR to solve Ax = b, where the number of rows in A is greater
     /// than the number of columns
     fn solve_lst_sq(&mut self, a: SparseColMatRef<usize, dtype>, b: MatRef<dtype>) -> Mat<dtype>;
+
+    /// Clear cached symbolic factorizations after the sparse structure changes.
+    fn reset_symbolic(&mut self) {}
 }
 
 impl Default for Box<dyn LinearSolver> {
@@ -73,6 +76,10 @@ impl LinearSolver for CholeskySolver {
 
         self.solve_symmetric(ata.as_ref(), atb.as_ref())
     }
+
+    fn reset_symbolic(&mut self) {
+        self.sparsity_pattern = None;
+    }
 }
 
 // ------------------------- QR Linear Solver ------------------------- //
@@ -108,6 +115,10 @@ impl LinearSolver for QRSolver {
         .as_ref()
         .subrows(0, a.ncols())
         .to_owned()
+    }
+
+    fn reset_symbolic(&mut self) {
+        self.sparsity_pattern = None;
     }
 }
 
@@ -147,6 +158,10 @@ impl LinearSolver for LUSolver {
         let atb = a.transpose().mul(b);
 
         self.solve_symmetric(ata.as_ref(), atb.as_ref())
+    }
+
+    fn reset_symbolic(&mut self) {
+        self.sparsity_pattern = None;
     }
 }
 

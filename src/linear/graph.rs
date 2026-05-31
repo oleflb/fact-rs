@@ -3,7 +3,7 @@ use faer_ext::IntoFaer;
 
 use super::LinearValues;
 use crate::{
-    containers::{GraphOrder, Idx, ValuesOrder},
+    containers::{GraphOrder, GraphStructureHash, Idx, ValuesOrder},
     dtype,
     linalg::DiffResult,
     linear::LinearFactor,
@@ -63,6 +63,7 @@ impl LinearGraph {
                 .expect("Failed to create sparse matrix");
 
         GraphOrder {
+            structure_hash: GraphStructureHash::EMPTY,
             order,
             sparsity_pattern,
             sparsity_order,

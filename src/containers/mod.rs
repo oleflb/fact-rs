@@ -10,7 +10,7 @@ mod order;
 pub use order::{Idx, ValuesOrder};
 
 mod graph;
-pub use graph::{Graph, GraphFormatter, GraphOrder};
+pub use graph::{Graph, GraphFormatter, GraphOrder, GraphStructureHash};
 
 mod factor;
 pub use factor::{Factor, FactorBuilder, FactorFormatter};

@@ -2,7 +2,7 @@ use faer_ext::IntoNalgebra;
 
 use super::{BaseOptParams, OptObserverVec, OptResult, Optimizer};
 use crate::{
-    containers::{Graph, GraphOrder, Values, ValuesOrder},
+    containers::{Graph, GraphOrder, Values},
     dtype,
     linalg::DiffResult,
     linear::{LinearSolver, LinearValues},
@@ -69,13 +69,17 @@ impl Optimizer for GaussNewton {
         &self.params
     }
 
-    fn init(&mut self, _values: &Values) -> Vec<&'static str> {
-        // TODO: Some way to manual specify how to compute ValuesOrder
-        // Precompute the sparsity pattern
-        self.graph_order = Some(
-            self.graph
-                .sparsity_pattern(_values, ValuesOrder::from_values(_values)),
-        );
+    fn init(&mut self, values: &Values) -> Vec<&'static str> {
+        let structure = self.graph.structure(values);
+        let rebuild = self
+            .graph_order
+            .as_ref()
+            .is_none_or(|order| order.structure_hash != structure.hash);
+
+        if rebuild {
+            self.graph_order = Some(self.graph.sparsity_pattern_from_structure(structure));
+            self.solver.reset_symbolic();
+        }
 
         Vec::new()
     }
@@ -112,8 +116,88 @@ impl Optimizer for GaussNewton {
 
 #[cfg(test)]
 mod test {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    use faer::{Mat, MatRef, sparse::SparseColMatRef};
+
     use super::*;
-    use crate::test_optimizer;
+    use crate::{
+        assign_symbols,
+        containers::{FactorBuilder, Values},
+        linear::CholeskySolver,
+        residuals::PriorResidual,
+        test_optimizer,
+        variables::{Variable, VectorVar3},
+    };
 
     test_optimizer!(GaussNewton);
+
+    assign_symbols!(X: VectorVar3);
+
+    struct CountingSolver {
+        inner: CholeskySolver,
+        resets: Arc<AtomicUsize>,
+    }
+
+    impl LinearSolver for CountingSolver {
+        fn solve_symmetric(
+            &mut self,
+            a: SparseColMatRef<usize, dtype>,
+            b: MatRef<dtype>,
+        ) -> Mat<dtype> {
+            self.inner.solve_symmetric(a, b)
+        }
+
+        fn solve_lst_sq(
+            &mut self,
+            a: SparseColMatRef<usize, dtype>,
+            b: MatRef<dtype>,
+        ) -> Mat<dtype> {
+            self.inner.solve_lst_sq(a, b)
+        }
+
+        fn reset_symbolic(&mut self) {
+            self.resets.fetch_add(1, Ordering::SeqCst);
+            self.inner.reset_symbolic();
+        }
+    }
+
+    #[test]
+    fn optimize_reuses_order_until_graph_structure_changes() {
+        let resets = Arc::new(AtomicUsize::new(0));
+
+        let mut graph = Graph::new();
+        graph.add_factor(
+            FactorBuilder::new(PriorResidual::new(VectorVar3::new(1.0, 0.0, 0.0)), X(0)).build(),
+        );
+
+        let mut values = Values::new();
+        values.insert(X(0), VectorVar3::identity());
+        values.insert(X(1), VectorVar3::identity());
+
+        let mut opt = GaussNewton::new_default(graph);
+        opt.set_solver(CountingSolver {
+            inner: CholeskySolver::default(),
+            resets: resets.clone(),
+        });
+
+        let values = opt.optimize(values).expect("first optimization succeeds");
+        assert_eq!(resets.load(Ordering::SeqCst), 1);
+
+        let values = opt
+            .optimize(values)
+            .expect("unchanged graph still succeeds");
+        assert_eq!(resets.load(Ordering::SeqCst), 1);
+
+        opt.graph_mut().add_factor(
+            FactorBuilder::new(PriorResidual::new(VectorVar3::new(0.0, 1.0, 0.0)), X(1)).build(),
+        );
+
+        opt.optimize(values)
+            .expect("changed graph rebuilds and succeeds");
+        assert_eq!(resets.load(Ordering::SeqCst), 2);
+    }
 }
