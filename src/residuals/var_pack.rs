@@ -248,6 +248,16 @@ pub trait KeyPack {
     fn into_keys(self) -> Vec<Key>;
 }
 
+/// Converts query input into ordered keys without allocating for fixed arities.
+pub trait QueryKeys {
+    type Storage: AsRef<[Key]>;
+
+    fn into_storage(self) -> Self::Storage;
+}
+
+/// Query key pack validated against a residual input type.
+pub trait QueryInput<P: VarPack>: QueryKeys {}
+
 impl<K> KeyPack for K
 where
     K: Symbol,
@@ -257,11 +267,40 @@ where
     }
 }
 
+impl<K> QueryKeys for K
+where
+    K: Symbol,
+{
+    type Storage = [Key; 1];
+
+    fn into_storage(self) -> Self::Storage {
+        [self.into()]
+    }
+}
+
+impl<K, V> QueryInput<V> for K
+where
+    K: TypedSymbol<V>,
+    V: VariableDtype + 'static,
+{
+}
+
 impl<K> KeyPack for Vec<K>
 where
     K: Into<Key>,
 {
     fn into_keys(self) -> Vec<Key> {
+        self.into_iter().map(Into::into).collect()
+    }
+}
+
+impl<K> QueryKeys for Vec<K>
+where
+    K: Into<Key>,
+{
+    type Storage = Vec<Key>;
+
+    fn into_storage(self) -> Self::Storage {
         self.into_iter().map(Into::into).collect()
     }
 }
@@ -275,11 +314,40 @@ where
     }
 }
 
+impl<K, const N: usize> QueryKeys for [K; N]
+where
+    K: Into<Key>,
+{
+    type Storage = [Key; N];
+
+    fn into_storage(self) -> Self::Storage {
+        self.map(Into::into)
+    }
+}
+
+impl<'a> QueryKeys for &'a [Key] {
+    type Storage = &'a [Key];
+
+    fn into_storage(self) -> Self::Storage {
+        self
+    }
+}
+
 impl KeyPack for DynVarPack {
     fn into_keys(self) -> Vec<Key> {
         self.into_keys()
     }
 }
+
+impl QueryKeys for DynVarPack {
+    type Storage = Vec<Key>;
+
+    fn into_storage(self) -> Self::Storage {
+        self.into_keys()
+    }
+}
+
+impl QueryInput<DynVarPack> for DynVarPack {}
 
 macro_rules! impl_tuple_factor_input {
     ($(($key:ident, $var:ident)),+ $(,)?) => {
@@ -305,7 +373,34 @@ macro_rules! impl_tuple_factor_input {
                 vec![$($key.into(),)+]
             }
         }
+
+        impl<$($key),+> QueryKeys for ($($key,)+)
+        where
+            $($key: Symbol,)+
+        {
+            type Storage = [Key; count_exprs!($($key),+)];
+
+            fn into_storage(self) -> Self::Storage {
+                #[allow(non_snake_case)]
+                let ($($key,)+) = self;
+                [$($key.into(),)+]
+            }
+        }
+
+        impl<$($key, $var),+> QueryInput<($($var,)+)> for ($($key,)+)
+        where
+            $($key: TypedSymbol<$var>,)+
+            $($var: VariableDtype + 'static,)+
+        {
+        }
     };
+}
+
+macro_rules! count_exprs {
+    ($($expr:expr),+ $(,)?) => {
+        <[()]>::len(&[$(count_exprs!(@unit $expr)),+])
+    };
+    (@unit $expr:expr) => { () };
 }
 
 impl_tuple_factor_input!((K1, V1), (K2, V2));

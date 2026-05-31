@@ -14,3 +14,9 @@ pub use graph::{Graph, GraphFormatter, GraphOrder, GraphStructureHash};
 
 mod factor;
 pub use factor::{Factor, FactorBuilder, FactorFormatter};
+
+mod query;
+pub use query::{
+    FactorQuery, FactorQueryMut, NoiseFilter, NoiseFilterMut, ResidualFilter, ResidualFilterMut,
+    RobustFilter, RobustFilterMut,
+};

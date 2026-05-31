@@ -49,7 +49,9 @@ mod var_pack;
 #[cfg(feature = "serde")]
 pub use traits::tag_residual;
 pub use traits::{DynResidual, ErasedResidual, FixedOutputDim, Residual};
-pub use var_pack::{DynVarPack, FactorInput, KeyPack, ResidualError, VarPack};
+pub use var_pack::{
+    DynVarPack, FactorInput, KeyPack, QueryInput, QueryKeys, ResidualError, VarPack,
+};
 
 mod prior;
 pub use prior::PriorResidual;

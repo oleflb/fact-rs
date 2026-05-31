@@ -12,7 +12,12 @@ use super::{DefaultSymbolHandler, Idx, Key, KeyFormatter, Values, ValuesOrder};
 // Need custom debug to handle pretty key printing at the moment
 // Pad adapter helps with the pretty printing
 use crate::containers::factor::FactorFormatter;
-use crate::{containers::Factor, dtype, linear::LinearGraph};
+use crate::{
+    containers::Factor,
+    dtype,
+    linear::LinearGraph,
+    residuals::{ErasedResidual, QueryInput, QueryKeys, Residual},
+};
 
 /// Structure to represent a nonlinear factor graph
 ///
@@ -61,6 +66,57 @@ impl Graph {
 
     pub fn add_factor(&mut self, factor: Factor) {
         self.factors.push(factor);
+    }
+
+    pub fn factors_for<'a, K>(&'a self, keys: K) -> impl Iterator<Item = &'a Factor> + 'a
+    where
+        K: QueryKeys + 'a,
+        K::Storage: 'a,
+    {
+        let keys = keys.into_storage();
+        self.factors
+            .iter()
+            .filter(move |factor| factor.keys() == keys.as_ref())
+    }
+
+    pub fn factors_for_mut<'a, K>(
+        &'a mut self,
+        keys: K,
+    ) -> impl Iterator<Item = &'a mut Factor> + 'a
+    where
+        K: QueryKeys + 'a,
+        K::Storage: 'a,
+    {
+        let keys = keys.into_storage();
+        self.factors
+            .iter_mut()
+            .filter(move |factor| factor.keys() == keys.as_ref())
+    }
+
+    pub fn factors_for_residual<'a, R, K>(
+        &'a self,
+        keys: K,
+    ) -> impl Iterator<Item = &'a Factor> + 'a
+    where
+        R: Residual + ErasedResidual + 'static,
+        K: QueryInput<R::Input> + 'a,
+        K::Storage: 'a,
+    {
+        self.factors_for(keys)
+            .filter(|factor| factor.is_residual::<R>())
+    }
+
+    pub fn factors_for_residual_mut<'a, R, K>(
+        &'a mut self,
+        keys: K,
+    ) -> impl Iterator<Item = &'a mut Factor> + 'a
+    where
+        R: Residual + ErasedResidual + 'static,
+        K: QueryInput<R::Input> + 'a,
+        K::Storage: 'a,
+    {
+        self.factors_for_mut(keys)
+            .filter(|factor| factor.is_residual::<R>())
     }
 
     pub fn len(&self) -> usize {
@@ -339,8 +395,10 @@ mod tests {
     use super::*;
     use crate::{
         assign_symbols,
-        containers::{FactorBuilder, Values},
-        residuals::PriorResidual,
+        containers::{FactorBuilder, FactorQuery, FactorQueryMut, Values},
+        noise::{GaussianNoise, UnitNoiseDyn},
+        residuals::{BetweenResidual, PriorResidual},
+        robust::{GemanMcClure, L2},
         variables::{Variable, VectorVar2, VectorVar3},
     };
 
@@ -354,6 +412,104 @@ mod tests {
 
     fn prior_x(idx: u32) -> Factor {
         FactorBuilder::new(PriorResidual::new(VectorVar2::new(1.0, 2.0)), X(idx)).build()
+    }
+
+    fn between_x(lhs: u32, rhs: u32) -> Factor {
+        FactorBuilder::new(
+            BetweenResidual::new(VectorVar2::new(1.0, 2.0)),
+            (X(lhs), X(rhs)),
+        )
+        .build()
+    }
+
+    #[test]
+    fn factors_for_matches_exact_ordered_keys() {
+        let mut graph = Graph::new();
+        graph.add_factor(prior_x(0));
+        graph.add_factor(between_x(0, 1));
+
+        assert_eq!(graph.factors_for(X(0)).count(), 1);
+        assert_eq!(graph.factors_for((X(0), X(1))).count(), 1);
+        assert_eq!(graph.factors_for((X(1), X(0))).count(), 0);
+    }
+
+    #[test]
+    fn factors_for_filters_by_component_type() {
+        let mut graph = Graph::new();
+        graph.add_factor(
+            FactorBuilder::new(PriorResidual::new(VectorVar2::new(1.0, 2.0)), X(0))
+                .noise(GaussianNoise::<2>::from_diag_sigmas(1.0, 2.0))
+                .robust(GemanMcClure::default())
+                .build(),
+        );
+        graph.add_factor(prior_x(0));
+
+        assert_eq!(graph.factors_for(X(0)).count(), 2);
+        assert_eq!(
+            graph
+                .factors_for(X(0))
+                .residual::<PriorResidual<VectorVar2>>()
+                .count(),
+            2
+        );
+        assert_eq!(
+            graph
+                .factors_for(X(0))
+                .noise::<GaussianNoise<2>>()
+                .robust::<GemanMcClure>()
+                .count(),
+            1
+        );
+        assert_eq!(graph.factors_for(X(0)).noise::<UnitNoiseDyn>().count(), 1);
+        assert_eq!(graph.factors_for(X(0)).robust::<L2>().count(), 1);
+    }
+
+    #[test]
+    fn factors_for_mut_updates_matching_factors() {
+        let mut graph = Graph::new();
+        graph.add_factor(prior_x(0));
+        graph.add_factor(prior_x(1));
+
+        for factor in graph
+            .factors_for_mut(X(0))
+            .residual::<PriorResidual<VectorVar2>>()
+        {
+            factor.set_robust(GemanMcClure::default());
+        }
+
+        assert_eq!(graph.factors_for(X(0)).robust::<GemanMcClure>().count(), 1);
+        assert_eq!(graph.factors_for(X(1)).robust::<GemanMcClure>().count(), 0);
+    }
+
+    #[test]
+    fn typed_residual_query_validates_key_input() {
+        let mut graph = Graph::new();
+        graph.add_factor(prior_x(0));
+
+        assert_eq!(
+            graph
+                .factors_for_residual::<PriorResidual<VectorVar2>, _>(X(0))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn replacing_queried_factor_changes_structure_hash() {
+        let mut values = values_x0();
+        values.insert(X(1), VectorVar2::identity());
+
+        let mut graph = Graph::new();
+        graph.add_factor(prior_x(0));
+        let hash = graph.structure_hash(&values);
+
+        for factor in graph.factors_for_mut(X(0)) {
+            factor.replace(PriorResidual::new(VectorVar2::new(3.0, 4.0)), X(1));
+        }
+
+        assert_ne!(hash, graph.structure_hash(&values));
+        assert_eq!(graph.factors_for(X(0)).count(), 0);
+        assert_eq!(graph.factors_for(X(1)).count(), 1);
     }
 
     #[test]

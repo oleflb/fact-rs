@@ -6,6 +6,7 @@ use crate::{
     linalg::{Diff, DiffInput, DiffResult, MatrixX, Numeric, VectorX},
     residuals::{DynVarPack, ResidualError, VarPack},
 };
+use downcast_rs::{Downcast, impl_downcast};
 use dyn_clone::DynClone;
 
 /// Typed residual authoring trait.
@@ -23,7 +24,7 @@ pub trait FixedOutputDim {
 
 /// Object-safe residual trait stored by factors.
 #[cfg_attr(feature = "serde", typetag::serde(tag = "tag"))]
-pub trait ErasedResidual: Debug + DynClone + Send {
+pub trait ErasedResidual: Debug + DynClone + Downcast + Send {
     fn dim_in(&self, values: &Values, keys: &[Key]) -> Result<usize, ResidualError>;
 
     fn dim_out(&self, values: &Values, keys: &[Key]) -> Result<usize, ResidualError>;
@@ -38,6 +39,7 @@ pub trait ErasedResidual: Debug + DynClone + Send {
 }
 
 dyn_clone::clone_trait_object!(ErasedResidual);
+impl_downcast!(ErasedResidual);
 
 #[cfg(feature = "serde")]
 pub use register_erasedresidual as tag_residual;

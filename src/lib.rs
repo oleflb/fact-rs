@@ -199,10 +199,11 @@ pub mod symbols {
 /// ```
 pub mod traits {
     pub use crate::{
+        containers::{FactorQuery, FactorQueryMut},
         linalg::Diff,
         noise::NoiseModel,
         optimizers::Optimizer,
-        residuals::{DynResidual, ErasedResidual, Residual, VarPack},
+        residuals::{DynResidual, ErasedResidual, QueryInput, QueryKeys, Residual, VarPack},
         robust::RobustCost,
         variables::Variable,
     };

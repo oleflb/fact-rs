@@ -22,6 +22,7 @@
 
 use std::fmt::Debug;
 
+use downcast_rs::{Downcast, impl_downcast};
 use dyn_clone::DynClone;
 
 use crate::dtype;
@@ -33,7 +34,7 @@ use crate::dtype;
 /// to implement your own kernel, we recommend using
 /// [test_robust](crate::test_robust) to ensure weight = loss'(d) / d
 #[cfg_attr(feature = "serde", typetag::serde(tag = "tag"))]
-pub trait RobustCost: Debug + DynClone + Send {
+pub trait RobustCost: Debug + DynClone + Downcast + Send {
     /// Compute the loss \rho(x^2)
     fn loss(&self, d2: dtype) -> dtype;
 
@@ -42,6 +43,7 @@ pub trait RobustCost: Debug + DynClone + Send {
 }
 
 dyn_clone::clone_trait_object!(RobustCost);
+impl_downcast!(RobustCost);
 
 #[cfg(feature = "serde")]
 pub use register_robustcost as tag_robust;

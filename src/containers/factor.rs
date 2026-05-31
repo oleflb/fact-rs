@@ -133,6 +133,109 @@ impl Factor {
         &self.keys
     }
 
+    pub fn is_residual<R>(&self) -> bool
+    where
+        R: ErasedResidual + 'static,
+    {
+        self.residual_as::<R>().is_some()
+    }
+
+    pub fn residual_as<R>(&self) -> Option<&R>
+    where
+        R: ErasedResidual + 'static,
+    {
+        self.residual.downcast_ref::<R>()
+    }
+
+    pub fn residual_as_mut<R>(&mut self) -> Option<&mut R>
+    where
+        R: ErasedResidual + 'static,
+    {
+        self.residual.downcast_mut::<R>()
+    }
+
+    pub fn is_noise<N>(&self) -> bool
+    where
+        N: NoiseModel + 'static,
+    {
+        self.noise_as::<N>().is_some()
+    }
+
+    pub fn noise_as<N>(&self) -> Option<&N>
+    where
+        N: NoiseModel + 'static,
+    {
+        self.noise.downcast_ref::<N>()
+    }
+
+    pub fn noise_as_mut<N>(&mut self) -> Option<&mut N>
+    where
+        N: NoiseModel + 'static,
+    {
+        self.noise.downcast_mut::<N>()
+    }
+
+    pub fn is_robust<C>(&self) -> bool
+    where
+        C: RobustCost + 'static,
+    {
+        self.robust_as::<C>().is_some()
+    }
+
+    pub fn robust_as<C>(&self) -> Option<&C>
+    where
+        C: RobustCost + 'static,
+    {
+        self.robust.downcast_ref::<C>()
+    }
+
+    pub fn robust_as_mut<C>(&mut self) -> Option<&mut C>
+    where
+        C: RobustCost + 'static,
+    {
+        self.robust.downcast_mut::<C>()
+    }
+
+    pub fn set_noise<N>(&mut self, noise: N)
+    where
+        N: NoiseModel + 'static,
+    {
+        self.noise = Box::new(noise);
+    }
+
+    pub fn set_robust<C>(&mut self, robust: C)
+    where
+        C: RobustCost + 'static,
+    {
+        self.robust = Box::new(robust);
+    }
+
+    pub fn replace<R, K>(&mut self, residual: R, keys: K)
+    where
+        R: Residual + ErasedResidual + 'static,
+        K: FactorInput<R::Input>,
+    {
+        self.keys = keys.into_keys();
+        self.residual = Box::new(residual);
+    }
+
+    pub fn replace_unchecked<R, K>(&mut self, residual: R, keys: K)
+    where
+        R: Residual + ErasedResidual + 'static,
+        K: KeyPack,
+    {
+        self.keys = keys.into_keys();
+        self.residual = Box::new(residual);
+    }
+
+    pub fn replace_dyn<R>(&mut self, residual: R, input: DynVarPack)
+    where
+        R: DynResidual + ErasedResidual + 'static,
+    {
+        self.keys = input.into_keys();
+        self.residual = Box::new(residual);
+    }
+
     fn validate_noise_dim(&self, residual_dim: usize) -> Result<(), ResidualError> {
         let noise_dim = self.noise.dim();
         if noise_dim == 0 || noise_dim == residual_dim {
