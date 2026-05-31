@@ -14,12 +14,13 @@ pub trait Residual: Debug + Clone + Send + 'static {
     type Input: VarPack + DiffInput;
     type Differ: Diff<Self::Input>;
 
-    fn residual<T: Numeric>(&self, input: <Self::Input as DiffInput>::Packed<T>) -> VectorX<T>;
-}
+    /// Output dimension for this residual instance.
+    ///
+    /// This must remain invariant while a graph is optimized. The graph sparse
+    /// structure is built from these dimensions.
+    fn dim_out(&self) -> usize;
 
-/// Optional marker for residuals with a compile-time output dimension.
-pub trait FixedOutputDim {
-    type DimOut: crate::linalg::DimName;
+    fn residual<T: Numeric>(&self, input: <Self::Input as DiffInput>::Packed<T>) -> VectorX<T>;
 }
 
 /// Object-safe residual trait stored by factors.

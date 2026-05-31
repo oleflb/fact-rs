@@ -49,6 +49,10 @@ impl Residual for GpsResidual {
     // of residual
     type Input = SE2;
 
+    fn dim_out(&self) -> usize {
+        2
+    }
+
     // D is a custom numeric type that can be leveraged for autodiff
     fn residual<T: Numeric>(&self, v: SE2<T>) -> VectorX<T> {
         // Convert measurement from dtype to T

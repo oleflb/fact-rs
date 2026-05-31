@@ -396,8 +396,9 @@ mod tests {
     use crate::{
         assign_symbols,
         containers::{FactorBuilder, FactorQuery, FactorQueryMut, Values},
+        linalg::{ForwardProp, Numeric, VectorX},
         noise::{GaussianNoise, UnitNoiseDyn},
-        residuals::{BetweenResidual, PriorResidual},
+        residuals::{BetweenResidual, PriorResidual, Residual},
         robust::{GemanMcClure, L2},
         variables::{Variable, VectorVar2, VectorVar3},
     };
@@ -527,6 +528,35 @@ mod tests {
         assert!(graph_order.order.get(X(0)).is_some());
         assert!(graph_order.order.get(Y(0)).is_none());
         assert_eq!(graph_order.structure_hash, graph.structure_hash(&values));
+    }
+
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    struct PanicResidual;
+
+    #[factrs::mark]
+    impl Residual for PanicResidual {
+        type Input = VectorVar2;
+        type Differ = ForwardProp;
+
+        fn dim_out(&self) -> usize {
+            2
+        }
+
+        fn residual<T: Numeric>(&self, _input: VectorVar2<T>) -> VectorX<T> {
+            panic!("structure construction must not evaluate residuals")
+        }
+    }
+
+    #[test]
+    fn sparsity_pattern_uses_dim_out_without_evaluating_residual() {
+        let values = values_x0();
+        let mut graph = Graph::new();
+        graph.add_factor(FactorBuilder::new(PanicResidual, X(0)).build());
+
+        let graph_order = graph.sparsity_pattern(&values);
+
+        assert_eq!(graph_order.order.dim(), 2);
     }
 
     #[test]

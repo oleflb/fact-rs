@@ -60,12 +60,10 @@ pub fn mark(mut item: ItemImpl) -> TokenStream2 {
 
                 fn dim_out(
                     &self,
-                    values: &factrs::containers::Values,
-                    keys: &[factrs::containers::Key],
+                    _values: &factrs::containers::Values,
+                    _keys: &[factrs::containers::Key],
                 ) -> Result<usize, factrs::residuals::ResidualError> {
-                    let input = <<Self as factrs::residuals::Residual>::Input as factrs::residuals::VarPack>::input(values, keys)?;
-                    let input = <<Self as factrs::residuals::Residual>::Input as factrs::linalg::DiffInput>::pack(&input);
-                    Ok(factrs::residuals::Residual::residual::<factrs::dtype>(self, input).len())
+                    Ok(factrs::residuals::Residual::dim_out(self))
                 }
 
                 fn residual(

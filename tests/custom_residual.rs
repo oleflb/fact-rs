@@ -24,6 +24,10 @@ impl Residual for XPrior {
     type Differ = ForwardProp;
     type Input = SE2;
 
+    fn dim_out(&self) -> usize {
+        1
+    }
+
     fn residual<T: Numeric>(&self, v: SE2<T>) -> VectorX<T> {
         let z_meas = T::from(self.x);
         vectorx![z_meas - v.xy().x]

@@ -4,7 +4,7 @@ use crate::{
     linalg::{
         AllocatorBuffer, DefaultAllocator, DualAllocator, DualVector, ForwardProp, Numeric, VectorX,
     },
-    residuals::{FixedOutputDim, Residual},
+    residuals::Residual,
     variables::{Variable, VariableDtype},
 };
 
@@ -41,12 +41,12 @@ where
     type Input = (P, P);
     type Differ = ForwardProp;
 
+    fn dim_out(&self) -> usize {
+        P::DIM
+    }
+
     fn residual<T: Numeric>(&self, (v1, v2): (P::Alias<T>, P::Alias<T>)) -> VectorX<T> {
         let delta = self.delta.cast::<T>();
         v1.compose(&delta).ominus(&v2)
     }
-}
-
-impl<P: VariableDtype + 'static> FixedOutputDim for BetweenResidual<P> {
-    type DimOut = P::Dim;
 }

@@ -2,9 +2,9 @@ use super::{Accel, Gravity, Gyro, ImuState, delta::ImuDelta};
 use crate::{
     containers::{Factor, FactorBuilder, Symbol, TypedSymbol},
     dtype,
-    linalg::{Const, ForwardProp, Matrix, Matrix3, VectorX},
+    linalg::{ForwardProp, Matrix, Matrix3, VectorX},
     noise::GaussianNoise,
-    residuals::{FixedOutputDim, Residual},
+    residuals::Residual,
     variables::{ImuBias, MatrixLieGroup, SE3, SO3, Variable, VectorVar3},
 };
 // ------------------------- Covariances ------------------------- //
@@ -294,6 +294,10 @@ impl Residual for ImuPreintegrationResidual {
     type Input = (SE3, VectorVar3, ImuBias, SE3, VectorVar3, ImuBias);
     type Differ = ForwardProp;
 
+    fn dim_out(&self) -> usize {
+        15
+    }
+
     fn residual<T: crate::linalg::Numeric>(
         &self,
         (x1, v1, b1, x2, v2, b2): (
@@ -342,10 +346,6 @@ impl Residual for ImuPreintegrationResidual {
 
         residual
     }
-}
-
-impl FixedOutputDim for ImuPreintegrationResidual {
-    type DimOut = Const<15>;
 }
 
 #[cfg(test)]

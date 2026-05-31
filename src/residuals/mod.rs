@@ -39,6 +39,10 @@
 //!     type Input = SE3;
 //!     type Differ = ForwardProp;
 //!
+//!     fn dim_out(&self) -> usize {
+//!         1
+//!     }
+//!
 //!     fn residual<T: Numeric>(&self, x1: SE3<T>) -> VectorX<T> {
 //!         VectorX::from_element(1, T::from(self.value) - x1.xyz().z)
 //!     }
@@ -48,7 +52,7 @@ mod traits;
 mod var_pack;
 #[cfg(feature = "serde")]
 pub use traits::tag_residual;
-pub use traits::{DynResidual, ErasedResidual, FixedOutputDim, Residual};
+pub use traits::{DynResidual, ErasedResidual, Residual};
 pub use var_pack::{
     DynVarPack, FactorInput, KeyPack, QueryInput, QueryKeys, ResidualError, VarPack,
 };
