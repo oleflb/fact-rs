@@ -268,6 +268,7 @@ impl<'a> FromIterator<&'a VectorVar2> for Points2D {
     }
 }
 
+#[allow(clippy::unnecessary_cast)]
 impl<'a> FromIterator<&'a SE2> for Arrows2D {
     fn from_iter<I: IntoIterator<Item = &'a SE2>>(iter: I) -> Arrows2D {
         let mut vectors = Vec::new();
@@ -331,6 +332,7 @@ impl<'a> FromIterator<&'a VectorVar3> for Points3D {
     }
 }
 
+#[allow(clippy::unnecessary_cast)]
 impl<'a> FromIterator<&'a SE3> for Arrows3D {
     fn from_iter<I: IntoIterator<Item = &'a SE3>>(iter: I) -> Arrows3D {
         let mut vectors = Vec::new();
@@ -464,7 +466,7 @@ impl From<Graph> for (GraphNodes, GraphEdges) {
 pub struct RerunObserver<V, R>
 where
     V: VariableDtype + 'static,
-    R: AsComponents,
+    R: AsComponents + Send,
     for<'a> R: FromIterator<&'a V>,
 {
     rec: rerun::RecordingStream,
@@ -476,7 +478,7 @@ where
 impl<V, R> RerunObserver<V, R>
 where
     V: VariableDtype + 'static,
-    R: AsComponents,
+    R: AsComponents + Send,
     for<'a> R: FromIterator<&'a V>,
 {
     pub fn new(rec: rerun::RecordingStream, topic: &str) -> Self {
@@ -492,7 +494,7 @@ where
 impl<V, R> OptObserver for RerunObserver<V, R>
 where
     V: VariableDtype + 'static,
-    R: AsComponents,
+    R: AsComponents + Send,
     for<'a> R: FromIterator<&'a V>,
 {
     fn on_step(&self, values: &Values, idx: i64) {
