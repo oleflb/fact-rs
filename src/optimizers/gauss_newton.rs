@@ -1,8 +1,8 @@
 use faer_ext::IntoNalgebra;
 
-use super::{BaseOptParams, OptObserverVec, OptResult, Optimizer};
+use super::{BaseOptParams, OptError, OptObserverVec, OptResult, Optimizer};
 use crate::{
-    containers::{Graph, GraphOrder, Values},
+    containers::{Graph, GraphOrder, GraphStructureHash, Values, ValuesOrder},
     dtype,
     linalg::DiffResult,
     linear::{LinearSolver, LinearValues},
@@ -23,12 +23,20 @@ pub struct GaussNewton {
     observers: OptObserverVec,
     // For caching computation between steps
     graph_order: Option<GraphOrder>,
+    dense_order: Option<(GraphStructureHash, ValuesOrder)>,
+    use_dense_normal_equations: bool,
 }
 
 impl GaussNewton {
     /// Sets the linear solver to use for the optimizer.
     pub fn set_solver(&mut self, solver: impl LinearSolver + 'static) {
         self.solver = Box::new(solver);
+        self.use_dense_normal_equations = false;
+    }
+
+    /// Uses dense normal equations for small systems instead of the configured sparse solver.
+    pub fn set_dense_normal_equations(&mut self, enabled: bool) {
+        self.use_dense_normal_equations = enabled;
     }
 }
 
@@ -42,6 +50,8 @@ impl Optimizer for GaussNewton {
             observers: OptObserverVec::default(),
             params,
             graph_order: None,
+            dense_order: None,
+            use_dense_normal_equations: false,
         }
     }
 
@@ -70,7 +80,25 @@ impl Optimizer for GaussNewton {
     }
 
     fn init(&mut self, values: &Values) -> Vec<&'static str> {
+        const DENSE_NORMAL_EQUATION_MAX_DIM: usize = 512;
+
         let structure = self.graph.structure(values);
+        if self.use_dense_normal_equations && structure.total_cols <= DENSE_NORMAL_EQUATION_MAX_DIM
+        {
+            let rebuild = self
+                .dense_order
+                .as_ref()
+                .is_none_or(|(hash, _)| *hash != structure.hash);
+
+            if rebuild {
+                self.dense_order = Some((structure.hash, structure.order));
+                self.graph_order = None;
+            }
+
+            return Vec::new();
+        }
+
+        self.dense_order = None;
         let rebuild = self
             .graph_order
             .as_ref()
@@ -87,26 +115,34 @@ impl Optimizer for GaussNewton {
     fn step(&mut self, mut values: Values, _idx: usize) -> OptResult<(Values, String)> {
         // Solve the linear system
         let linear_graph = self.graph.linearize(&values);
-        let ordered =
-            linear_graph.with_order(self.graph_order.as_ref().expect("Missing graph order"));
-        let DiffResult { value: r, diff: j } = ordered.residual_jacobian();
+        let delta = if let Some((_, order)) = &self.dense_order {
+            let (hessian, rhs) = linear_graph.dense_normal_equations(order);
+            if let Some(cholesky) = hessian.clone().cholesky() {
+                cholesky.solve(&rhs)
+            } else {
+                hessian.lu().solve(&rhs).ok_or(OptError::InvalidSystem)?
+            }
+        } else {
+            let ordered =
+                linear_graph.with_order(self.graph_order.as_ref().expect("Missing graph order"));
+            let DiffResult { value: r, diff: j } = ordered.residual_jacobian();
 
-        // Solve Ax = b
-        let delta = self
-            .solver
-            .solve_lst_sq(j.as_ref(), r.as_ref())
-            .as_ref()
-            .into_nalgebra()
-            .column(0)
-            .clone_owned();
+            // Solve Ax = b
+            self.solver
+                .solve_lst_sq(j.as_ref(), r.as_ref())
+                .as_ref()
+                .into_nalgebra()
+                .column(0)
+                .clone_owned()
+        };
 
         // Update the values
         let dx = LinearValues::from_order_and_vector(
-            self.graph_order
+            self.dense_order
                 .as_ref()
-                .expect("Missing graph order")
-                .order
-                .clone(),
+                .map(|(_, order)| order.clone())
+                .or_else(|| self.graph_order.as_ref().map(|order| order.order.clone()))
+                .expect("Missing graph order"),
             delta,
         );
         values.oplus_mut(&dx);
