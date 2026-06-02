@@ -3,8 +3,9 @@
 mod factor;
 pub use factor::LinearFactor;
 
+pub(crate) mod dense_normal;
+
 mod graph;
-pub(crate) use graph::accumulate_dense_normal_factor;
 pub use graph::{LinearGraph, OrderedLinearGraph};
 
 mod values;

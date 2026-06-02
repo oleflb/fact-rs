@@ -16,7 +16,7 @@ use crate::{
     containers::Factor,
     dtype,
     linalg::{MatrixX, VectorX},
-    linear::{LinearGraph, accumulate_dense_normal_factor},
+    linear::{LinearGraph, dense_normal::accumulate_dense_normal_factor},
     residuals::{ErasedResidual, QueryInput, QueryKeys, Residual},
 };
 
@@ -411,6 +411,8 @@ impl StructureHasher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use matrixcompare::assert_matrix_eq;
+
     use crate::{
         assign_symbols,
         containers::{FactorBuilder, FactorQuery, FactorQueryMut, Values},
@@ -561,8 +563,8 @@ mod tests {
         let (direct_hessian, direct_rhs) = graph.dense_normal_equations(&values, &order);
         let (linear_hessian, linear_rhs) = graph.linearize(&values).dense_normal_equations(&order);
 
-        assert!((&direct_hessian - &linear_hessian).norm() < 1e-12);
-        assert!((&direct_rhs - &linear_rhs).norm() < 1e-12);
+        assert_matrix_eq!(direct_hessian, linear_hessian, comp = float);
+        assert_matrix_eq!(direct_rhs, linear_rhs, comp = float);
     }
 
     #[derive(Clone, Debug)]
