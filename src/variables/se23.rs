@@ -116,12 +116,11 @@ impl<T: Numeric> Variable for SE23<T> {
             let C;
             if w2 < T::from(1e-5) {
                 B = T::from(0.5);
-                C = T::from(1.0 / 6.0);
+                C = T::from(1.0 / 12.0);
             } else {
                 let w = w2.sqrt();
-                let A = w.sin() / w;
                 B = (T::from(1.0) - w.cos()) / w2;
-                C = (T::from(1.0) - A) / w2;
+                C = T::one() / w2 - (T::one() + w.cos()) / (T::from(2.0) * w * w.sin());
             }
             let I = Matrix3::identity();
             let wx = SO3::hat(xi_theta.as_view());
