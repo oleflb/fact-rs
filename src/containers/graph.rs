@@ -15,7 +15,8 @@ use crate::containers::factor::FactorFormatter;
 use crate::{
     containers::Factor,
     dtype,
-    linear::LinearGraph,
+    linalg::{MatrixX, VectorX},
+    linear::{LinearGraph, accumulate_dense_normal_factor},
     residuals::{ErasedResidual, QueryInput, QueryKeys, Residual},
 };
 
@@ -134,6 +135,23 @@ impl Graph {
     pub fn linearize(&self, values: &Values) -> LinearGraph {
         let factors = self.factors.iter().map(|f| f.linearize(values)).collect();
         LinearGraph::from_vec(factors)
+    }
+
+    pub(crate) fn dense_normal_equations(
+        &self,
+        values: &Values,
+        order: &ValuesOrder,
+    ) -> (MatrixX, VectorX) {
+        let dim = order.dim();
+        let mut hessian = MatrixX::zeros(dim, dim);
+        let mut rhs = VectorX::zeros(dim);
+
+        for nonlinear_factor in &self.factors {
+            let factor = nonlinear_factor.linearize(values);
+            accumulate_dense_normal_factor(&factor, order, &mut hessian, &mut rhs);
+        }
+
+        (hessian, rhs)
     }
 
     pub fn structure_hash(&self, values: &Values) -> GraphStructureHash {
@@ -528,6 +546,23 @@ mod tests {
         assert!(graph_order.order.get(X(0)).is_some());
         assert!(graph_order.order.get(Y(0)).is_none());
         assert_eq!(graph_order.structure_hash, graph.structure_hash(&values));
+    }
+
+    #[test]
+    fn dense_normal_equations_match_linearized_graph() {
+        let mut values = values_x0();
+        values.insert(X(1), VectorVar2::new(0.5, -1.0));
+
+        let mut graph = Graph::new();
+        graph.add_factor(prior_x(0));
+        graph.add_factor(between_x(0, 1));
+
+        let order = ValuesOrder::from_values(&values);
+        let (direct_hessian, direct_rhs) = graph.dense_normal_equations(&values, &order);
+        let (linear_hessian, linear_rhs) = graph.linearize(&values).dense_normal_equations(&order);
+
+        assert!((&direct_hessian - &linear_hessian).norm() < 1e-12);
+        assert!((&direct_rhs - &linear_rhs).norm() < 1e-12);
     }
 
     #[derive(Clone, Debug)]

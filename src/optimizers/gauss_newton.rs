@@ -114,15 +114,15 @@ impl Optimizer for GaussNewton {
 
     fn step(&mut self, mut values: Values, _idx: usize) -> OptResult<(Values, String)> {
         // Solve the linear system
-        let linear_graph = self.graph.linearize(&values);
         let delta = if let Some((_, order)) = &self.dense_order {
-            let (hessian, rhs) = linear_graph.dense_normal_equations(order);
+            let (hessian, rhs) = self.graph.dense_normal_equations(&values, order);
             if let Some(cholesky) = hessian.clone().cholesky() {
                 cholesky.solve(&rhs)
             } else {
                 hessian.lu().solve(&rhs).ok_or(OptError::InvalidSystem)?
             }
         } else {
+            let linear_graph = self.graph.linearize(&values);
             let ordered =
                 linear_graph.with_order(self.graph_order.as_ref().expect("Missing graph order"));
             let DiffResult { value: r, diff: j } = ordered.residual_jacobian();

@@ -4,6 +4,7 @@ mod factor;
 pub use factor::LinearFactor;
 
 mod graph;
+pub(crate) use graph::accumulate_dense_normal_factor;
 pub use graph::{LinearGraph, OrderedLinearGraph};
 
 mod values;
