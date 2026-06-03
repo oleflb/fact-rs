@@ -6,9 +6,16 @@ use crate::{
 /// Error types for optimizers
 #[derive(Debug)]
 pub enum OptError {
-    MaxIterations(Values),
     InvalidSystem,
     FailedToStep,
+}
+
+/// Terminal status for an optimization call that did not hit a hard solver error.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OptStatus {
+    Converged,
+    /// The optimizer reached its iteration budget; values contain the latest iterate.
+    MaxIterations,
 }
 
 /// Result type for optimizers
@@ -116,8 +123,9 @@ pub trait Optimizer {
 
     /// Perform a single step of optimization
     ///
-    /// Returns the new values and a string with information about the step
-    fn step(&mut self, values: Values, idx: usize) -> OptResult<(Values, String)>;
+    /// Mutates the values in-place and returns a string with information about the step.
+    /// Implementations should leave values unchanged when returning an error.
+    fn step(&mut self, values: &mut Values, idx: usize) -> OptResult<String>;
 
     /// Compute the error of the current values
     fn error(&self, values: &Values) -> dtype;
@@ -130,16 +138,19 @@ pub trait Optimizer {
     }
 
     // ------------------------- Derived from the above ------------------------- //
-    /// Main optimization call function
-    fn optimize(&mut self, mut values: Values) -> OptResult<Values> {
+    /// Main optimization call function.
+    ///
+    /// Mutates `values` in-place. `OptStatus::MaxIterations` is a successful
+    /// return with `values` left at the latest iterate.
+    fn optimize(&mut self, values: &mut Values) -> OptResult<OptStatus> {
         // Setup up everything from our values
-        let append = self.init(&values);
+        let append = self.init(values);
 
         // Check if we need to optimize at all
-        let mut error_old = self.error(&values);
+        let mut error_old = self.error(values);
         if error_old <= self.params().error_tol {
             log::info!("Error is already below tolerance, skipping optimization");
-            return Ok(values);
+            return Ok(OptStatus::Converged);
         }
 
         let extra = if append.is_empty() { "" } else { " |" };
@@ -183,12 +194,11 @@ pub trait Optimizer {
         let mut error_new = error_old;
         for i in 1..self.params().max_iterations + 1 {
             error_old = error_new;
-            let (temp, info) = self.step(values, i)?;
-            values = temp;
-            self.observers().notify(&values, i);
+            let info = self.step(values, i)?;
+            self.observers().notify(values, i);
 
             // Evaluate error again to see how we did
-            error_new = self.error(&values);
+            error_new = self.error(values);
 
             let error_decrease_abs = error_old - error_new;
             let error_decrease_rel = error_decrease_abs / error_old;
@@ -200,19 +210,19 @@ pub trait Optimizer {
             // Check if we need to stop
             if error_new <= self.params().error_tol {
                 log::info!("Error is below tolerance, stopping optimization");
-                return Ok(values);
+                return Ok(OptStatus::Converged);
             }
             if error_decrease_abs >= 0.0 && error_decrease_abs <= self.params().error_tol_absolute {
                 log::info!("Error decrease is below absolute tolerance, stopping optimization");
-                return Ok(values);
+                return Ok(OptStatus::Converged);
             }
             if error_decrease_rel >= 0.0 && error_decrease_rel <= self.params().error_tol_relative {
                 log::info!("Error decrease is below relative tolerance, stopping optimization");
-                return Ok(values);
+                return Ok(OptStatus::Converged);
             }
         }
 
-        Err(OptError::MaxIterations(values))
+        Ok(OptStatus::MaxIterations)
     }
 
     fn add_observer(&mut self, observer: impl OptObserver + 'static)

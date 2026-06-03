@@ -123,7 +123,7 @@ impl Optimizer for LevenMarquardt {
     }
 
     // TODO: More sophisticated stopping criteria based on magnitude of the gradient
-    fn step(&mut self, mut values: Values, _idx: usize) -> OptResult<(Values, String)> {
+    fn step(&mut self, values: &mut Values, _idx: usize) -> OptResult<String> {
         let order = self
             .graph_order
             .as_ref()
@@ -132,7 +132,7 @@ impl Optimizer for LevenMarquardt {
             .clone();
 
         // Form the linear system
-        let linear_graph = self.graph.linearize(&values);
+        let linear_graph = self.graph.linearize(values);
         let ordered =
             linear_graph.with_order(self.graph_order.as_ref().expect("Missing graph order"));
         let DiffResult { value: r, diff: j } = ordered.residual_jacobian();
@@ -167,7 +167,7 @@ impl Optimizer for LevenMarquardt {
 
         let mut dx = LinearValues::zero_from_order(order.clone());
         let old_lin_error = ordered.error(&dx);
-        let old_error = self.graph.error(&values);
+        let old_error = self.graph.error(values);
         let mut model_fidelity;
 
         loop {
@@ -223,9 +223,9 @@ impl Optimizer for LevenMarquardt {
             self.lambda = self.params.lambda_min;
         }
 
-        Ok((
-            values,
-            format!("{:^12.4e} | {:^12.4e} |", self.lambda, model_fidelity),
+        Ok(format!(
+            "{:^12.4e} | {:^12.4e} |",
+            self.lambda, model_fidelity
         ))
     }
 }

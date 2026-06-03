@@ -4,7 +4,9 @@ use std::{env, time::Instant};
 use factrs::rerun::RerunObserver;
 use factrs::{
     core::{GaussNewton, LevenMarquardt, SE2, SE3},
-    optimizers::{BaseOptParams, GncGemanMcClure, GncParams, GraduatedNonConvexity, LevenParams},
+    optimizers::{
+        BaseOptParams, GncGemanMcClure, GncParams, GraduatedNonConvexity, LevenParams, OptStatus,
+    },
     traits::Optimizer,
     utils::load_g20,
 };
@@ -76,7 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load the graph from the g2o file
     let filename = &args[1];
-    let (graph, init) = load_g20(filename);
+    let (graph, mut init) = load_g20(filename);
     println!("File loaded, {} factors", graph.len());
 
     let obj = &args[3];
@@ -130,12 +132,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ------------------------- Optimize ------------------------- //
     let start = Instant::now();
-    let result = optimizer.optimize(init);
+    let result = optimizer.optimize(&mut init);
     let duration = start.elapsed();
 
     match result {
-        Ok(_) => println!("Optimization converged!"),
-        Err(_) => println!("Optimization failed!"),
+        Ok(OptStatus::Converged) => println!("Optimization converged!"),
+        Ok(OptStatus::MaxIterations) => println!("Optimization reached max iterations!"),
+        Err(error) => println!("Optimization failed: {error:?}"),
     }
     println!("Optimization took: {duration:?}");
     Ok(())

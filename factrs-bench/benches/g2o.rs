@@ -8,8 +8,10 @@ fn factrs(bencher: Bencher, file: &str) {
     let (graph, init) = load_g20(&format!("{}{}", DATA_DIR, file));
     bencher.bench(|| {
         let mut opt: GaussNewton = GaussNewton::new_default(graph.clone());
-        let mut results = opt.optimize(init.clone());
-        black_box(&mut results);
+        let mut values = init.clone();
+        let mut result = opt.optimize(&mut values);
+        black_box(&mut result);
+        black_box(&mut values);
     });
 }
 

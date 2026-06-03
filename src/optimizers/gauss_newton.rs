@@ -112,17 +112,17 @@ impl Optimizer for GaussNewton {
         Vec::new()
     }
 
-    fn step(&mut self, mut values: Values, _idx: usize) -> OptResult<(Values, String)> {
+    fn step(&mut self, values: &mut Values, _idx: usize) -> OptResult<String> {
         // Solve the linear system
         let delta = if let Some((_, order)) = &self.dense_order {
-            let (hessian, rhs) = self.graph.dense_normal_equations(&values, order);
+            let (hessian, rhs) = self.graph.dense_normal_equations(values, order);
             if let Some(cholesky) = hessian.clone().cholesky() {
                 cholesky.solve(&rhs)
             } else {
                 hessian.lu().solve(&rhs).ok_or(OptError::InvalidSystem)?
             }
         } else {
-            let linear_graph = self.graph.linearize(&values);
+            let linear_graph = self.graph.linearize(values);
             let ordered =
                 linear_graph.with_order(self.graph_order.as_ref().expect("Missing graph order"));
             let DiffResult { value: r, diff: j } = ordered.residual_jacobian();
@@ -147,7 +147,7 @@ impl Optimizer for GaussNewton {
         );
         values.oplus_mut(&dx);
 
-        Ok((values, String::new()))
+        Ok(String::new())
     }
 }
 
@@ -221,11 +221,11 @@ mod test {
             resets: resets.clone(),
         });
 
-        let values = opt.optimize(values).expect("first optimization succeeds");
+        opt.optimize(&mut values)
+            .expect("first optimization succeeds");
         assert_eq!(resets.load(Ordering::SeqCst), 1);
 
-        let values = opt
-            .optimize(values)
+        opt.optimize(&mut values)
             .expect("unchanged graph still succeeds");
         assert_eq!(resets.load(Ordering::SeqCst), 1);
 
@@ -233,7 +233,7 @@ mod test {
             FactorBuilder::new(PriorResidual::new(VectorVar3::new(0.0, 1.0, 0.0)), X(1)).build(),
         );
 
-        opt.optimize(values)
+        opt.optimize(&mut values)
             .expect("changed graph rebuilds and succeeds");
         assert_eq!(resets.load(Ordering::SeqCst), 2);
     }

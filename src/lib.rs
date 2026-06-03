@@ -69,8 +69,8 @@
 //!
 //! // Optimize!
 //! let mut opt: GaussNewton = GaussNewton::new_default(graph);
-//! let result = opt.optimize(values).unwrap();
-//! println!("Results {:#}", result);
+//! opt.optimize(&mut values).unwrap();
+//! println!("Results {:#}", values);
 //! ```
 
 #![warn(clippy::unwrap_used)]

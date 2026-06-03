@@ -37,7 +37,8 @@
 //! simple tests over a few different variable types to ensure correctness.
 mod traits;
 pub use traits::{
-    BaseOptParams, OptError, OptObserver, OptObserverVec, OptParams, OptResult, Optimizer,
+    BaseOptParams, OptError, OptObserver, OptObserverVec, OptParams, OptResult, OptStatus,
+    Optimizer,
 };
 
 mod macros;
@@ -90,7 +91,7 @@ pub mod test {
         graph.add_factor(factor);
 
         let mut opt = new(graph);
-        values = opt.optimize(values).expect("Optimization failed");
+        opt.optimize(&mut values).expect("Optimization failed");
 
         let out: &T = values.get_unchecked(X(0)).expect("Missing X(0)");
         assert_matrix_eq!(
@@ -140,7 +141,7 @@ pub mod test {
         graph.add_factor(factor);
 
         let mut opt = new(graph);
-        values = opt.optimize(values).expect("Optimization failed");
+        opt.optimize(&mut values).expect("Optimization failed");
 
         let out1: &T = values.get_unchecked(X(0)).expect("Missing X(0)");
         assert_matrix_eq!(

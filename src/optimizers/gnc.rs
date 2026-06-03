@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use statrs::distribution::{ChiSquared, ContinuousCDF};
 
 use super::{
-    BaseOptParams, LevenMarquardt, OptError, OptObserverVec, OptParams, OptResult, Optimizer,
+    BaseOptParams, LevenMarquardt, OptObserverVec, OptParams, OptResult, OptStatus, Optimizer,
 };
 use crate::{
     containers::{GraphOrder, ValuesOrder},
@@ -277,7 +277,7 @@ impl<K: ConvexableKernel + 'static, O: Optimizer> Optimizer for GraduatedNonConv
         vec!["     Mu     "]
     }
 
-    fn step(&mut self, mut values: Values, idx: usize) -> OptResult<(Values, String)> {
+    fn step(&mut self, values: &mut Values, _idx: usize) -> OptResult<String> {
         // Step the kernels
         self.kernels
             .iter_mut()
@@ -300,41 +300,34 @@ impl<K: ConvexableKernel + 'static, O: Optimizer> Optimizer for GraduatedNonConv
             .filter(|(f, k)| k.is_some())
             .for_each(|(f, k)| f.robust = k.unwrap().upcast());
 
-        // Optimize and return
-        let error = self.error(&values);
         let mut info = String::new();
         // let inner_params = self.params.inner.base_params();
 
         // TODO: We leave a lot of performance on the table here, since a lot of
         // orderings and symbolic decomp will be recomputed each step.
         let mut opt = O::new(self.params.inner.clone(), self.graph().clone());
-        let result = opt.optimize(values.clone());
-        match result {
-            Ok(v) => values = v,
-            Err(OptError::MaxIterations(v)) => {
-                values = v;
-            }
-            Err(e) => {
-                log::warn!("Inner optimizer failed");
-                return Err(e);
-            }
+        let mut candidate_values = values.clone();
+        if let Err(error) = opt.optimize(&mut candidate_values) {
+            log::warn!("Inner optimizer failed");
+            return Err(error);
         }
+        *values = candidate_values;
         info.push_str(&format!(" {mu:^12.4e} |"));
 
-        Ok((values, info))
+        Ok(info)
     }
 
     // Have to re-implement this because we need to do some extra stuff
     // Namely, to allow for increases to the error
-    fn optimize(&mut self, mut values: Values) -> OptResult<Values> {
+    fn optimize(&mut self, values: &mut Values) -> OptResult<OptStatus> {
         // Setup up everything from our values
-        let append = self.init(&values);
+        let append = self.init(values);
 
         // Check if we need to optimize at all
-        let mut error_old = self.error(&values);
+        let mut error_old = self.error(values);
         if error_old <= self.params().error_tol {
             log::info!("Error is already below tolerance, skipping optimization");
-            return Ok(values);
+            return Ok(OptStatus::Converged);
         }
 
         let extra = if append.is_empty() { "" } else { " |" };
@@ -378,12 +371,11 @@ impl<K: ConvexableKernel + 'static, O: Optimizer> Optimizer for GraduatedNonConv
         let mut error_new = error_old;
         for i in 1..self.params().max_iterations + 1 {
             error_old = error_new;
-            let (temp, info) = self.step(values, i)?;
-            values = temp;
-            self.observers().notify(&values, i);
+            let info = self.step(values, i)?;
+            self.observers().notify(values, i);
 
             // Evaluate error again to see how we did
-            error_new = self.error(&values);
+            error_new = self.error(values);
 
             // NOTE: This is the difference, we need to be ok with increases in error due to
             // changing the kernels
@@ -397,18 +389,18 @@ impl<K: ConvexableKernel + 'static, O: Optimizer> Optimizer for GraduatedNonConv
             // Check if we need to stop
             if error_new <= self.params().error_tol {
                 log::info!("Error is below tolerance, stopping optimization");
-                return Ok(values);
+                return Ok(OptStatus::Converged);
             }
             if error_decrease_abs <= self.params().error_tol_absolute {
                 log::info!("Error decrease is below absolute tolerance, stopping optimization");
-                return Ok(values);
+                return Ok(OptStatus::Converged);
             }
             if error_decrease_rel <= self.params().error_tol_relative {
                 log::info!("Error decrease is below relative tolerance, stopping optimization");
-                return Ok(values);
+                return Ok(OptStatus::Converged);
             }
         }
 
-        Err(OptError::MaxIterations(values))
+        Ok(OptStatus::MaxIterations)
     }
 }

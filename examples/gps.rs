@@ -123,7 +123,7 @@ fn main() {
 
     // optimize
     let mut opt: GaussNewton = GaussNewton::new_default(graph);
-    let result = opt.optimize(values).expect("Optimization failed");
+    opt.optimize(&mut values).expect("Optimization failed");
 
-    println!("Final Result: {result:#?}");
+    println!("Final Result: {values:#?}");
 }

@@ -405,20 +405,20 @@ mod test {
 
         // Optimize
         let mut opt: GaussNewton = GaussNewton::new_default(graph);
-        let results = opt.optimize(values).expect("Optimization failed");
+        opt.optimize(&mut values).expect("Optimization failed");
 
         // Check results
         let t = n as dtype * dt;
         let xyz = Vector3::new(accel.0.x * t * t / 2.0, 0.0, 0.0);
 
         let x1_exp = SE3::from_rot_trans(SO3::identity(), xyz);
-        let x1_got = results.get(X(1)).expect("Somehow missing X(1)").clone();
+        let x1_got = values.get(X(1)).expect("Somehow missing X(1)").clone();
         println!("x1_exp: {x1_exp}");
         println!("x1_got: {x1_got}");
         assert_variable_eq!(x1_got, x1_exp, comp = abs, tol = 1e-5);
 
         let v1_exp = VectorVar3::new(accel.0.x * t, 0.0, 0.0);
-        let v1_got = results.get(V(1)).expect("Somehow missing V(1)").clone();
+        let v1_got = values.get(V(1)).expect("Somehow missing V(1)").clone();
         println!("v1_exp: {v1_exp}");
         println!("v1_got: {v1_got}");
         assert_variable_eq!(v1_got, v1_exp, comp = abs, tol = 1e-5);
